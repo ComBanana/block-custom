@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://dbvbei7nqdr2g"]
+
+[ext_resource type="Script" uid="uid://coglmd2chwppf" path="res://scripts/chunk.gd" id="1_3txbk"]
+
+[node name="Chunk" type="Node3D" unique_id=263266745]
+script = ExtResource("1_3txbk")
+
+[node name="ChunkMesh" type="MeshInstance3D" parent="." unique_id=1479652065]
+
+[node name="ChunkCollision" type="StaticBody3D" parent="." unique_id=2092708177]
+
+[node name="CollisionShape" type="CollisionShape3D" parent="ChunkCollision" unique_id=630919570]

@@ -1,0 +1,163 @@
+[gd_scene format=3 uid="uid://5d333pi8ecf5"]
+
+[ext_resource type="PackedScene" uid="uid://b4u0g4umogc60" path="res://scenes/Player.tscn" id="1_elqb8"]
+[ext_resource type="Script" uid="uid://c5ol4prxkmv3p" path="res://scripts/world.gd" id="3_0bbpv"]
+[ext_resource type="Script" uid="uid://dl1eytg3vi5b7" path="res://scripts/hud.gd" id="3_rarhs"]
+[ext_resource type="Script" uid="uid://cf1oh6mm6po" path="res://scripts/loading_screen.gd" id="4_vcsgt"]
+[ext_resource type="Texture2D" uid="uid://doybihnefmmiy" path="res://textures/dirt.png" id="5_c01mt"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_rarhs"]
+sky_top_color = Color(0.30980393, 0.6392157, 1, 1)
+sky_horizon_color = Color(0.7490196, 0.8980392, 1, 1)
+ground_bottom_color = Color(0.68303835, 0.81582355, 0.84652156, 1)
+ground_horizon_color = Color(0.7490196, 0.8980392, 1, 1)
+
+[sub_resource type="Sky" id="Sky_0bbpv"]
+sky_material = SubResource("ProceduralSkyMaterial_rarhs")
+
+[sub_resource type="Environment" id="Environment_fn0im"]
+background_mode = 2
+sky = SubResource("Sky_0bbpv")
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_sky_contribution = 0.0
+
+[node name="Main" type="Node3D" unique_id=816244598]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=532012915]
+environment = SubResource("Environment_fn0im")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1999806570]
+transform = Transform3D(0.8660254, 0.38302222, -0.32139382, 0, 0.64278764, 0.76604444, 0.5, -0.66341394, 0.5566704, 0, 0, 0)
+
+[node name="Player" parent="." unique_id=282764273 instance=ExtResource("1_elqb8")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 8)
+
+[node name="Audio" type="Node" parent="." unique_id=1859972468]
+
+[node name="Music" type="AudioStreamPlayer" parent="Audio" unique_id=478883951]
+
+[node name="Ambience" type="AudioStreamPlayer" parent="Audio" unique_id=1589942748]
+
+[node name="SFX" type="AudioStreamPlayer" parent="Audio" unique_id=54547083]
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1375384716]
+script = ExtResource("3_rarhs")
+
+[node name="FPSLabel" type="Label" parent="HUD" unique_id=952423764]
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 57.0
+offset_bottom = 35.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 20
+text = "FPS: 0"
+
+[node name="Crosshair" type="Label" parent="HUD" unique_id=1744371313]
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+theme_override_font_sizes/font_size = 20
+text = "+"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hotbar" type="PanelContainer" parent="HUD" unique_id=534882038]
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Slots" type="HBoxContainer" parent="HUD/Hotbar" unique_id=33149937]
+layout_mode = 2
+
+[node name="Slot1" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1369149653]
+layout_mode = 2
+
+[node name="Slot2" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1715555778]
+layout_mode = 2
+
+[node name="Slot3" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1555543061]
+layout_mode = 2
+
+[node name="Slot4" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1668439310]
+layout_mode = 2
+
+[node name="Slot5" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1352673730]
+layout_mode = 2
+
+[node name="Slot6" type="Panel" parent="HUD/Hotbar/Slots" unique_id=753111250]
+layout_mode = 2
+
+[node name="Slot7" type="Panel" parent="HUD/Hotbar/Slots" unique_id=748973002]
+layout_mode = 2
+
+[node name="Slot8" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1027810358]
+layout_mode = 2
+
+[node name="Slot9" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1247082512]
+layout_mode = 2
+
+[node name="World" type="Node3D" parent="." unique_id=983543485]
+script = ExtResource("3_0bbpv")
+
+[node name="LoadingLayer" type="CanvasLayer" parent="." unique_id=333889242]
+layer = 100
+
+[node name="LoadingScreen" type="Control" parent="LoadingLayer" unique_id=42526486]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_vcsgt")
+
+[node name="Background" type="TextureRect" parent="LoadingLayer/LoadingScreen" unique_id=1072739292]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("5_c01mt")
+expand_mode = 1
+stretch_mode = 1
+
+[node name="Center" type="CenterContainer" parent="LoadingLayer/LoadingScreen" unique_id=1706274015]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="LoadingLayer/LoadingScreen/Center" unique_id=1404413469]
+layout_mode = 2
+
+[node name="Status" type="Label" parent="LoadingLayer/LoadingScreen/Center/Content" unique_id=1842151657]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Generating nearby terrain..."
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ProgressBar" parent="LoadingLayer/LoadingScreen/Center/Content" unique_id=1928416135]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="LoadingLayer/LoadingScreen" unique_id=89415867]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -80.5
+offset_right = 80.5
+offset_bottom = 45.0
+grow_horizontal = 2
+theme_override_font_sizes/font_size = 32
+text = "BlockCraft"
+horizontal_alignment = 1
