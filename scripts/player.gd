@@ -5,8 +5,6 @@ extends CharacterBody3D
 # =========================
 
 @export_category("Movement")
-
-@export_category("Movement")
 @export var walk_speed: float = 4.3
 @export var sprint_speed: float = 5.6
 @export var jump_velocity: float = 8.0

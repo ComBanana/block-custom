@@ -8,8 +8,6 @@ const GRASS: int = 1
 const DIRT: int = 2
 const STONE: int = 3
 
-const BLOCK_SIZE: float = 1.0
-
 const GRASS_TEXTURE := preload("res://textures/grass.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
@@ -75,9 +73,6 @@ func get_block(x: int, y: int, z: int) -> int:
 		return AIR
 
 	if z < 0 or z >= CHUNK_SIZE:
-		return AIR
-
-	if blocks.is_empty():
 		return AIR
 
 	return blocks[_get_index(x, y, z)]
@@ -261,8 +256,16 @@ func finish_mesh_build() -> void:
 	collision_ready = false
 
 
+func clear_collision() -> void:
+	$ChunkCollision/CollisionShape.shape = null
+	collision_ready = false
+
+
 func build_collision() -> void:
 	if not mesh_ready:
+		return
+
+	if not is_inside_tree():
 		return
 
 	var mesh: Mesh = $ChunkMesh.mesh
@@ -286,26 +289,6 @@ func build_collision() -> void:
 	$ChunkCollision/CollisionShape.shape = collision_shape
 
 	collision_ready = true
-
-
-func rebuild() -> void:
-	request_mesh_rebuild()
-
-
-func request_mesh_rebuild() -> void:
-	if not is_generated:
-		return
-
-	mesh_ready = false
-
-	var world = get_parent()
-
-	if world == null:
-		return
-
-	world.enqueue_mesh_chunk(
-		chunk_coordinate
-	)
 
 
 func get_block_for_mesh(
@@ -496,7 +479,6 @@ func _add_face(
 		v1,
 		v2,
 		v3,
-		normal
 	)
 
 
@@ -506,7 +488,6 @@ func _add_quad(
 	v1: Vector3,
 	v2: Vector3,
 	v3: Vector3,
-	normal: Vector3
 ) -> void:
 
 	# First triangle

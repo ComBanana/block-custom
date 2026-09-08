@@ -6,8 +6,6 @@ const CHUNK_HEIGHT: int = 24
 
 const AIR: int = 0
 const GRASS: int = 1
-const DIRT: int = 2
-const STONE: int = 3
 
 const INVALID_CHUNK := Vector2i(999999, 999999)
 
@@ -25,6 +23,9 @@ const INVALID_CHUNK := Vector2i(999999, 999999)
 @export var mesh_columns_per_frame: int = 4
 @export var mesh_budget_ms: float = 2.0
 @export var collisions_per_frame: int = 1
+
+@export_category("Collision")
+@export var collision_distance: int = 2
 
 
 var terrain_noise := FastNoiseLite.new()
@@ -83,6 +84,7 @@ func _process(_delta: float) -> void:
 		if current_chunk != player_chunk:
 			player_chunk = current_chunk
 			update_chunks()
+			update_collision_range()
 
 	process_load_queue()
 	process_generation_queue()
@@ -106,6 +108,20 @@ func world_to_chunk(
 			world_position.z / CHUNK_SIZE
 		)
 	)
+
+
+func is_chunk_within_collision_distance(
+	chunk_coord: Vector2i
+) -> bool:
+	var dx: int = abs(
+		chunk_coord.x - player_chunk.x
+	)
+
+	var dz: int = abs(
+		chunk_coord.y - player_chunk.y
+	)
+
+	return dx <= collision_distance and dz <= collision_distance
 
 
 func update_chunks() -> void:
@@ -372,9 +388,17 @@ func enqueue_collision_chunk(
 	if not loaded_chunks.has(chunk_coord):
 		return
 
+	if not is_chunk_within_collision_distance(
+		chunk_coord
+	):
+		return
+
 	var chunk = loaded_chunks[chunk_coord]
 
 	if not chunk.mesh_ready:
+		return
+
+	if chunk.collision_ready:
 		return
 
 	if collision_queued.has(chunk_coord):
@@ -382,6 +406,25 @@ func enqueue_collision_chunk(
 
 	collision_queue.append(chunk_coord)
 	collision_queued[chunk_coord] = true
+
+
+func update_collision_range() -> void:
+	for chunk_coord in loaded_chunks:
+		var chunk = loaded_chunks[chunk_coord]
+
+		if is_chunk_within_collision_distance(
+			chunk_coord
+		):
+			if (
+				chunk.mesh_ready
+				and not chunk.collision_ready
+			):
+				enqueue_collision_chunk(
+					chunk_coord
+				)
+		else:
+			if chunk.collision_ready:
+				chunk.clear_collision()
 
 
 func process_collision_queue() -> void:
@@ -401,6 +444,17 @@ func process_collision_queue() -> void:
 			continue
 
 		var chunk = loaded_chunks[chunk_coord]
+
+		if not is_chunk_within_collision_distance(
+			chunk_coord
+		):
+			continue
+
+		if not chunk.mesh_ready:
+			continue
+
+		if chunk.collision_ready:
+			continue
 
 		chunk.build_collision()
 
