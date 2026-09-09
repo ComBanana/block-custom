@@ -7,10 +7,14 @@ const AIR: int = 0
 const GRASS: int = 1
 const DIRT: int = 2
 const STONE: int = 3
+const SAND: int = 4
+const WATER: int = 5
 
 const GRASS_TEXTURE := preload("res://textures/grass.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
+const SAND_TEXTURE := preload("res://textures/sand.png")
+const WATER_TEXTURE := preload("res://textures/water.png")
 
 var blocks := PackedByteArray()
 
@@ -21,11 +25,13 @@ var hill_noise: FastNoiseLite
 var mountain_region_noise: FastNoiseLite
 var mountain_shape_noise: FastNoiseLite
 
+var generation_passes_done: bool = false
+var mesh_ready: bool = false
+var collision_ready: bool = false
+
 var is_generated: bool = false
 var terrain_generating: bool = false
 var mesh_building: bool = false
-var mesh_ready: bool = false
-var collision_ready: bool = false
 
 var terrain_x: int = 0
 var mesh_x: int = 0
@@ -33,10 +39,14 @@ var mesh_x: int = 0
 var grass_tool: SurfaceTool
 var dirt_tool: SurfaceTool
 var stone_tool: SurfaceTool
+var sand_tool: SurfaceTool
+var water_tool: SurfaceTool
 
 var grass_material: StandardMaterial3D
 var dirt_material: StandardMaterial3D
 var stone_material: StandardMaterial3D
+var sand_material: StandardMaterial3D
+var water_material: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -51,6 +61,16 @@ func _ready() -> void:
 	stone_material = StandardMaterial3D.new()
 	stone_material.albedo_texture = STONE_TEXTURE
 	stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	sand_material = StandardMaterial3D.new()
+	sand_material.albedo_texture = SAND_TEXTURE
+	sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	water_material = StandardMaterial3D.new()
+	water_material.albedo_texture = WATER_TEXTURE
+	water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func _get_index(x: int, y: int, z: int) -> int:
@@ -201,6 +221,11 @@ func process_terrain_generation_step(
 				CHUNK_HEIGHT
 			)
 
+			var dirt_depth: int = _get_dirt_depth(
+				world_x,
+				world_z
+			)
+
 			for y in range(height):
 
 				if y == height - 1:
@@ -212,7 +237,7 @@ func process_terrain_generation_step(
 						GRASS
 					)
 
-				elif y >= height - 4:
+				elif y >= height - dirt_depth:
 
 					set_block(
 						x,
@@ -251,7 +276,28 @@ func process_terrain_generation_step(
 		is_generated = true
 
 
+func _get_dirt_depth(
+	world_x: int,
+	world_z: int
+) -> int:
+
+	var value: int = (
+		world_x * 374761393
+		+ world_z * 668265263
+		+ terrain_noise.seed * 1442695041
+	)
+
+	value = value ^ (value >> 13)
+	value = value * 1274126177
+	value = value ^ (value >> 16)
+
+	return 1 + posmod(absi(value), 3)
+
+
 func generate_terrain() -> void:
+	if is_generated:
+		return
+
 	begin_terrain_generation()
 
 	while terrain_generating:
@@ -259,6 +305,93 @@ func generate_terrain() -> void:
 			CHUNK_SIZE,
 			1000000.0
 		)
+
+	if not generation_passes_done:
+		replace_air_with_water()
+		replace_water_touching_blocks_with_sand()
+		generation_passes_done = true
+
+	is_generated = true
+
+
+func replace_air_with_water() -> void:
+	const WATER_LEVEL := 10
+
+	for x in range(CHUNK_SIZE):
+		for y in range(WATER_LEVEL + 1):
+			for z in range(CHUNK_SIZE):
+
+				if get_block(x, y, z) == AIR:
+					set_block(
+						x,
+						y,
+						z,
+						WATER
+					)
+
+
+func replace_water_touching_blocks_with_sand() -> void:
+	var blocks_to_sand: Array[Vector3i] = []
+
+	for x in range(CHUNK_SIZE):
+		for y in range(CHUNK_HEIGHT):
+			for z in range(CHUNK_SIZE):
+
+				var block_id: int = get_block(
+					x,
+					y,
+					z
+				)
+
+				if block_id == AIR:
+					continue
+
+				if block_id == WATER:
+					continue
+
+				if _is_touching_water(
+					x,
+					y,
+					z
+				):
+					blocks_to_sand.append(
+						Vector3i(x, y, z)
+					)
+
+	for block_position in blocks_to_sand:
+		set_block(
+			block_position.x,
+			block_position.y,
+			block_position.z,
+			SAND
+		)
+
+
+func _is_touching_water(
+	x: int,
+	y: int,
+	z: int
+) -> bool:
+
+	if get_block(x, y + 1, z) == WATER:
+		return true
+
+	if get_block(x, y - 1, z) == WATER:
+		return true
+
+	if get_block(x - 1, y, z) == WATER:
+		return true
+
+	if get_block(x + 1, y, z) == WATER:
+		return true
+
+	if get_block(x, y, z - 1) == WATER:
+		return true
+
+	if get_block(x, y, z + 1) == WATER:
+		return true
+
+	return false
 
 
 func rebuild_mesh_immediate() -> void:
@@ -286,6 +419,8 @@ func cancel_mesh_build() -> void:
 	grass_tool = null
 	dirt_tool = null
 	stone_tool = null
+	sand_tool = null
+	water_tool = null
 
 
 func begin_mesh_build() -> void:
@@ -299,14 +434,20 @@ func begin_mesh_build() -> void:
 	grass_tool = SurfaceTool.new()
 	dirt_tool = SurfaceTool.new()
 	stone_tool = SurfaceTool.new()
+	sand_tool = SurfaceTool.new()
+	water_tool = SurfaceTool.new()
 
 	grass_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	dirt_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	stone_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	sand_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	water_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 
 	grass_tool.set_material(grass_material)
 	dirt_tool.set_material(dirt_material)
 	stone_tool.set_material(stone_material)
+	sand_tool.set_material(sand_material)
+	water_tool.set_material(water_material)
 
 
 func process_mesh_step(
@@ -359,6 +500,22 @@ func process_mesh_step(
 							z
 						)
 
+					SAND:
+						_add_block_faces(
+							sand_tool,
+							x,
+							y,
+							z
+						)
+
+					WATER:
+						_add_water_block_faces(
+							water_tool,
+							x,
+							y,
+							z
+						)
+
 		mesh_x += 1
 		columns_done += 1
 
@@ -382,14 +539,21 @@ func finish_mesh_build() -> void:
 	grass_tool.generate_normals()
 	dirt_tool.generate_normals()
 	stone_tool.generate_normals()
+	sand_tool.generate_normals()
+	water_tool.generate_normals()
 
-	var mesh := ArrayMesh.new()
+	var solid_mesh := ArrayMesh.new()
+	var water_mesh := ArrayMesh.new()
 
-	grass_tool.commit(mesh)
-	dirt_tool.commit(mesh)
-	stone_tool.commit(mesh)
+	grass_tool.commit(solid_mesh)
+	dirt_tool.commit(solid_mesh)
+	stone_tool.commit(solid_mesh)
+	sand_tool.commit(solid_mesh)
 
-	$ChunkMesh.mesh = mesh
+	water_tool.commit(water_mesh)
+
+	$ChunkMesh.mesh = solid_mesh
+	$WaterMesh.mesh = water_mesh
 
 	mesh_building = false
 	mesh_ready = true
@@ -559,6 +723,86 @@ func _add_block_faces(
 		)
 
 
+func _add_water_block_faces(
+	surface_tool: SurfaceTool,
+	x: int,
+	y: int,
+	z: int
+) -> void:
+
+	var position := Vector3(
+		x,
+		y,
+		z
+	)
+
+	if get_block_for_mesh(
+		x,
+		y + 1,
+		z
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.UP
+		)
+
+	if get_block_for_mesh(
+		x,
+		y - 1,
+		z
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.DOWN
+		)
+
+	if get_block_for_mesh(
+		x,
+		y,
+		z - 1
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.FORWARD
+		)
+
+	if get_block_for_mesh(
+		x,
+		y,
+		z + 1
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.BACK
+		)
+
+	if get_block_for_mesh(
+		x - 1,
+		y,
+		z
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.LEFT
+		)
+
+	if get_block_for_mesh(
+		x + 1,
+		y,
+		z
+	) != WATER:
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.RIGHT
+		)
+
+
 func _add_face(
 	surface_tool: SurfaceTool,
 	position: Vector3,
@@ -659,13 +903,26 @@ func _add_quad(
 	surface_tool.add_vertex(v3)
 
 
-func get_highest_solid_block(x: int, z: int) -> int:
+func get_highest_solid_block(
+	x: int,
+	z: int
+) -> int:
+
 	for y in range(
 		CHUNK_HEIGHT - 1,
 		-1,
 		-1
 	):
-		if get_block(x, y, z) != AIR:
+		var block_id: int = get_block(
+			x,
+			y,
+			z
+		)
+
+		if (
+			block_id != AIR
+			and block_id != WATER
+		):
 			return y
 
 	return -1
