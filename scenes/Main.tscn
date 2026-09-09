@@ -5,6 +5,7 @@
 [ext_resource type="Script" uid="uid://dl1eytg3vi5b7" path="res://scripts/hud.gd" id="3_rarhs"]
 [ext_resource type="Script" uid="uid://cf1oh6mm6po" path="res://scripts/loading_screen.gd" id="4_vcsgt"]
 [ext_resource type="Texture2D" uid="uid://doybihnefmmiy" path="res://textures/dirt.png" id="5_c01mt"]
+[ext_resource type="Script" uid="uid://bsjemod2nujiv" path="res://scripts/pause_menu.gd" id="6_c01mt"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_rarhs"]
 sky_top_color = Color(0.30980393, 0.6392157, 1, 1)
@@ -40,6 +41,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 8)
 [node name="Ambience" type="AudioStreamPlayer" parent="Audio" unique_id=1589942748]
 
 [node name="SFX" type="AudioStreamPlayer" parent="Audio" unique_id=54547083]
+
+[node name="World" type="Node3D" parent="." unique_id=983543485]
+script = ExtResource("3_0bbpv")
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1375384716]
 script = ExtResource("3_rarhs")
@@ -103,9 +107,6 @@ layout_mode = 2
 [node name="Slot9" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1247082512]
 layout_mode = 2
 
-[node name="World" type="Node3D" parent="." unique_id=983543485]
-script = ExtResource("3_0bbpv")
-
 [node name="LoadingLayer" type="CanvasLayer" parent="." unique_id=333889242]
 layer = 100
 
@@ -161,3 +162,146 @@ grow_horizontal = 2
 theme_override_font_sizes/font_size = 32
 text = "BlockCraft"
 horizontal_alignment = 1
+
+[node name="PauseLayer" type="CanvasLayer" parent="." unique_id=440629387]
+process_mode = 3
+layer = 100
+script = ExtResource("6_c01mt")
+
+[node name="PauseMenu" type="Control" parent="PauseLayer" unique_id=736638780]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Overlay" type="ColorRect" parent="PauseLayer/PauseMenu" unique_id=1597498242]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.54901963)
+
+[node name="Center" type="CenterContainer" parent="PauseLayer/PauseMenu" unique_id=1500337648]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="PauseLayer/PauseMenu/Center" unique_id=1813258733]
+layout_mode = 2
+
+[node name="Buttons" type="VBoxContainer" parent="PauseLayer/PauseMenu/Center/Panel" unique_id=1434685293]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ResumeButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=1011859667]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Resume Game"
+
+[node name="SettingsButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=265337095]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Settings"
+
+[node name="StatisticsButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=604749282]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Statistics"
+
+[node name="QuitButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=1196458239]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Quit Game"
+
+[node name="MainMenuButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=966854439]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+disabled = true
+text = "Main Menu"
+
+[node name="SettingsCenter" type="CenterContainer" parent="PauseLayer/PauseMenu" unique_id=1479843354]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="SettingsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/SettingsCenter" unique_id=955647223]
+custom_minimum_size = Vector2(450, 420)
+layout_mode = 2
+
+[node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel" unique_id=1168816740]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1992639921]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="RenderDistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=2110824812]
+layout_mode = 2
+
+[node name="RenderDistanceLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/RenderDistanceRow" unique_id=498168172]
+layout_mode = 2
+text = "Render Distance"
+
+[node name="RenderDistanceValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/RenderDistanceRow" unique_id=785424370]
+layout_mode = 2
+text = "4"
+
+[node name="RenderDistanceSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=2075905500]
+custom_minimum_size = Vector2(400, 30)
+layout_mode = 2
+min_value = 2.0
+max_value = 16.0
+value = 4.0
+
+[node name="FOVRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=92609181]
+layout_mode = 2
+
+[node name="FOVLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/FOVRow" unique_id=1491103354]
+layout_mode = 2
+text = "Field of View"
+
+[node name="FOVValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/FOVRow" unique_id=977334008]
+layout_mode = 2
+text = "75"
+
+[node name="FOVSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1416400997]
+custom_minimum_size = Vector2(400, 30)
+layout_mode = 2
+min_value = 20.0
+max_value = 120.0
+value = 75.0
+
+[node name="WindowModeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1788238544]
+layout_mode = 2
+
+[node name="WindowModeLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/WindowModeRow" unique_id=1778258857]
+layout_mode = 2
+text = "Window Mode"
+
+[node name="WindowModeOption" type="OptionButton" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/WindowModeRow" unique_id=427996932]
+layout_mode = 2
+item_count = 2
+popup/item_0/text = "Windowed"
+popup/item_0/id = 0
+popup/item_1/text = "Fullscreen"
+popup/item_1/id = 1
+
+[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1860364801]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Back"
