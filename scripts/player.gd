@@ -15,6 +15,14 @@ extends CharacterBody3D
 @export var ground_friction: float = 32.0
 @export var air_acceleration: float = 7.0
 
+@export_category("Water")
+@export var water_gravity: float = 5.0
+@export var water_jump_velocity: float = 5.0
+@export var water_horizontal_acceleration: float = 14.0
+@export var water_friction: float = 10.0
+
+const WATER: int = 5
+
 # =========================
 # Mouse Look
 # =========================
@@ -219,6 +227,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				world.selected_block = 0
 
 
+func is_in_water() -> bool:
+	var water_sample_position: Vector3 = (
+		global_position + Vector3(0.0, 0.9, 0.0)
+	)
+
+	return (
+		world.get_block_world(
+			water_sample_position
+		) == WATER
+	)
+
+
 func _physics_process(delta: float) -> void:
 	if break_requested:
 		break_requested = false
@@ -228,29 +248,47 @@ func _physics_process(delta: float) -> void:
 		place_requested = false
 		place_block()
 
-	# Gravity
-	if not is_on_floor():
+	var in_water: bool = is_in_water()
+
+	# Vertical movement.
+	if in_water:
+		# Water greatly reduces falling speed.
+		velocity.y = move_toward(
+			velocity.y,
+			0.0,
+			water_gravity * delta
+		)
+
+		# Jump becomes a swimming upward movement.
+		if Input.is_action_just_pressed("jump"):
+			velocity.y = water_jump_velocity
+
+	elif not is_on_floor():
 		velocity.y -= gravity * delta
+
 	else:
 		# Prevent downward velocity from accumulating while grounded.
 		if velocity.y < 0.0:
 			velocity.y = 0.0
 
-	# Jump
-	if Input.is_action_just_pressed("jump") and is_on_floor():
-		velocity.y = jump_velocity
+		# Normal ground jump.
+		if Input.is_action_just_pressed("jump"):
+			velocity.y = jump_velocity
 
-	# Movement input
+	# Movement input.
 	var input_vector := Input.get_vector(
 		"move_left",
 		"move_right",
 		"move_forward",
 		"move_backward"
 	)
-	
+
 	var target_fov := normal_fov
 
-	if Input.is_action_pressed("sprint") and input_vector.length_squared() > 0.0:
+	if (
+		Input.is_action_pressed("sprint")
+		and input_vector.length_squared() > 0.0
+	):
 		target_fov = normal_fov * sprint_fov_multiplier
 
 	camera.fov = lerp(
@@ -272,7 +310,6 @@ func _physics_process(delta: float) -> void:
 
 	# Prevent the player from entering a chunk that is not ready.
 	if direction != Vector3.ZERO:
-
 		var predicted_position: Vector3 = (
 			global_position +
 			direction * 0.15
@@ -296,10 +333,9 @@ func _physics_process(delta: float) -> void:
 				predicted_chunk
 			)
 		):
-
 			direction = Vector3.ZERO
-	
-	# Target horizontal speed
+
+	# Target horizontal speed.
 	var current_speed := walk_speed
 
 	if Input.is_action_pressed("sprint"):
@@ -307,8 +343,34 @@ func _physics_process(delta: float) -> void:
 
 	var target_velocity := direction * current_speed
 
-	# Smooth horizontal movement
-	if is_on_floor():
+	# Horizontal movement.
+	if in_water:
+		if direction != Vector3.ZERO:
+			velocity.x = move_toward(
+				velocity.x,
+				target_velocity.x,
+				water_horizontal_acceleration * delta
+			)
+
+			velocity.z = move_toward(
+				velocity.z,
+				target_velocity.z,
+				water_horizontal_acceleration * delta
+			)
+		else:
+			velocity.x = move_toward(
+				velocity.x,
+				0.0,
+				water_friction * delta
+			)
+
+			velocity.z = move_toward(
+				velocity.z,
+				0.0,
+				water_friction * delta
+			)
+
+	elif is_on_floor():
 		if direction != Vector3.ZERO:
 			velocity.x = move_toward(
 				velocity.x,
@@ -333,6 +395,7 @@ func _physics_process(delta: float) -> void:
 				0.0,
 				ground_friction * delta
 			)
+
 	else:
 		velocity.x = move_toward(
 			velocity.x,

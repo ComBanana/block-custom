@@ -599,6 +599,12 @@ func enqueue_neighbor_meshes(
 		if not neighbor.is_generated:
 			continue
 
+		# If the neighbor is currently building its mesh,
+		# cancel that partial build. Its border may have
+		# been generated against an incomplete neighbor.
+		if neighbor.mesh_building:
+			neighbor.cancel_mesh_build()
+
 		enqueue_mesh_chunk(
 			neighbor_coordinate
 		)
@@ -642,7 +648,7 @@ func enqueue_mesh_chunk(
 		return
 
 	if chunk.mesh_building:
-		return
+		chunk.cancel_mesh_build()
 
 	if player_edit_queued.has(
 		chunk_coord

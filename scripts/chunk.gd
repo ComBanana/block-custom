@@ -70,6 +70,7 @@ func _ready() -> void:
 	water_material.albedo_texture = WATER_TEXTURE
 	water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water_material.albedo_color = Color(1.0, 1.0, 1.0, 0.5)
 	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
@@ -373,25 +374,92 @@ func _is_touching_water(
 	z: int
 ) -> bool:
 
-	if get_block(x, y + 1, z) == WATER:
+	if _get_block_for_generation(x, y + 1, z) == WATER:
 		return true
 
-	if get_block(x, y - 1, z) == WATER:
+	if _get_block_for_generation(x, y - 1, z) == WATER:
 		return true
 
-	if get_block(x - 1, y, z) == WATER:
+	if _get_block_for_generation(x - 1, y, z) == WATER:
 		return true
 
-	if get_block(x + 1, y, z) == WATER:
+	if _get_block_for_generation(x + 1, y, z) == WATER:
 		return true
 
-	if get_block(x, y, z - 1) == WATER:
+	if _get_block_for_generation(x, y, z - 1) == WATER:
 		return true
 
-	if get_block(x, y, z + 1) == WATER:
+	if _get_block_for_generation(x, y, z + 1) == WATER:
 		return true
 
 	return false
+
+
+func _get_block_for_generation(
+	x: int,
+	y: int,
+	z: int
+) -> int:
+
+	# Normal in-chunk lookup.
+	if (
+		x >= 0
+		and x < CHUNK_SIZE
+		and y >= 0
+		and y < CHUNK_HEIGHT
+		and z >= 0
+		and z < CHUNK_SIZE
+	):
+		return get_block(x, y, z)
+
+	# Outside the world vertically.
+	if y < 0 or y >= CHUNK_HEIGHT:
+		return AIR
+
+	var world = get_parent()
+
+	if world == null:
+		return AIR
+
+	var neighbor_coordinate := chunk_coordinate
+
+	var neighbor_x := x
+	var neighbor_z := z
+
+	if x < 0:
+		neighbor_coordinate.x -= 1
+		neighbor_x += CHUNK_SIZE
+
+	elif x >= CHUNK_SIZE:
+		neighbor_coordinate.x += 1
+		neighbor_x -= CHUNK_SIZE
+
+	if z < 0:
+		neighbor_coordinate.y -= 1
+		neighbor_z += CHUNK_SIZE
+
+	elif z >= CHUNK_SIZE:
+		neighbor_coordinate.y += 1
+		neighbor_z -= CHUNK_SIZE
+
+	if not world.loaded_chunks.has(
+		neighbor_coordinate
+	):
+		return AIR
+
+	var neighbor = world.loaded_chunks[
+		neighbor_coordinate
+	]
+
+	# The neighbor must have completed terrain + water generation.
+	if not neighbor.is_generated:
+		return AIR
+
+	return neighbor.get_block(
+		neighbor_x,
+		y,
+		neighbor_z
+	)
 
 
 func rebuild_mesh_immediate() -> void:
@@ -675,7 +743,9 @@ func _add_block_faces(
 	var position := Vector3(x, y, z)
 
 	# Top
-	if get_block_for_mesh(x, y + 1, z) == AIR:
+	var neighbor := get_block_for_mesh(x, y + 1, z)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -683,7 +753,9 @@ func _add_block_faces(
 		)
 
 	# Bottom
-	if get_block_for_mesh(x, y - 1, z) == AIR:
+	neighbor = get_block_for_mesh(x, y - 1, z)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -691,7 +763,9 @@ func _add_block_faces(
 		)
 
 	# Front
-	if get_block_for_mesh(x, y, z - 1) == AIR:
+	neighbor = get_block_for_mesh(x, y, z - 1)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -699,7 +773,9 @@ func _add_block_faces(
 		)
 
 	# Back
-	if get_block_for_mesh(x, y, z + 1) == AIR:
+	neighbor = get_block_for_mesh(x, y, z + 1)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -707,7 +783,9 @@ func _add_block_faces(
 		)
 
 	# Left
-	if get_block_for_mesh(x - 1, y, z) == AIR:
+	neighbor = get_block_for_mesh(x - 1, y, z)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -715,7 +793,9 @@ func _add_block_faces(
 		)
 
 	# Right
-	if get_block_for_mesh(x + 1, y, z) == AIR:
+	neighbor = get_block_for_mesh(x + 1, y, z)
+
+	if neighbor == AIR or neighbor == WATER:
 		_add_face(
 			surface_tool,
 			position,
@@ -730,6 +810,8 @@ func _add_water_block_faces(
 	z: int
 ) -> void:
 
+	const WATER_HEIGHT: float = 15.0 / 16.0
+
 	var position := Vector3(
 		x,
 		y,
@@ -740,18 +822,19 @@ func _add_water_block_faces(
 		x,
 		y + 1,
 		z
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
-			Vector3.UP
+			Vector3.UP,
+			WATER_HEIGHT
 		)
 
 	if get_block_for_mesh(
 		x,
 		y - 1,
 		z
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
@@ -762,51 +845,56 @@ func _add_water_block_faces(
 		x,
 		y,
 		z - 1
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
-			Vector3.FORWARD
+			Vector3.FORWARD,
+			WATER_HEIGHT
 		)
 
 	if get_block_for_mesh(
 		x,
 		y,
 		z + 1
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
-			Vector3.BACK
+			Vector3.BACK,
+			WATER_HEIGHT
 		)
 
 	if get_block_for_mesh(
 		x - 1,
 		y,
 		z
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
-			Vector3.LEFT
+			Vector3.LEFT,
+			WATER_HEIGHT
 		)
 
 	if get_block_for_mesh(
 		x + 1,
 		y,
 		z
-	) != WATER:
+	) == AIR:
 		_add_face(
 			surface_tool,
 			position,
-			Vector3.RIGHT
+			Vector3.RIGHT,
+			WATER_HEIGHT
 		)
 
 
 func _add_face(
 	surface_tool: SurfaceTool,
 	position: Vector3,
-	normal: Vector3
+	normal: Vector3,
+	height: float = 1.0
 ) -> void:
 
 	var v0: Vector3
@@ -816,10 +904,10 @@ func _add_face(
 
 	# TOP
 	if normal == Vector3.UP:
-		v0 = position + Vector3(0, 1, 0)
-		v1 = position + Vector3(1, 1, 0)
-		v2 = position + Vector3(1, 1, 1)
-		v3 = position + Vector3(0, 1, 1)
+		v0 = position + Vector3(0, height, 0)
+		v1 = position + Vector3(1, height, 0)
+		v2 = position + Vector3(1, height, 1)
+		v3 = position + Vector3(0, height, 1)
 
 	# BOTTOM
 	elif normal == Vector3.DOWN:
@@ -832,29 +920,29 @@ func _add_face(
 	elif normal == Vector3.FORWARD:
 		v0 = position + Vector3(0, 0, 0)
 		v1 = position + Vector3(1, 0, 0)
-		v2 = position + Vector3(1, 1, 0)
-		v3 = position + Vector3(0, 1, 0)
+		v2 = position + Vector3(1, height, 0)
+		v3 = position + Vector3(0, height, 0)
 
 	# BACK / +Z
 	elif normal == Vector3.BACK:
 		v0 = position + Vector3(0, 0, 1)
-		v1 = position + Vector3(0, 1, 1)
-		v2 = position + Vector3(1, 1, 1)
+		v1 = position + Vector3(0, height, 1)
+		v2 = position + Vector3(1, height, 1)
 		v3 = position + Vector3(1, 0, 1)
 
 	# LEFT / -X
 	elif normal == Vector3.LEFT:
 		v0 = position + Vector3(0, 0, 0)
-		v1 = position + Vector3(0, 1, 0)
-		v2 = position + Vector3(0, 1, 1)
+		v1 = position + Vector3(0, height, 0)
+		v2 = position + Vector3(0, height, 1)
 		v3 = position + Vector3(0, 0, 1)
 
 	# RIGHT / +X
 	elif normal == Vector3.RIGHT:
 		v0 = position + Vector3(1, 0, 0)
 		v1 = position + Vector3(1, 0, 1)
-		v2 = position + Vector3(1, 1, 1)
-		v3 = position + Vector3(1, 1, 0)
+		v2 = position + Vector3(1, height, 1)
+		v3 = position + Vector3(1, height, 0)
 
 	else:
 		return
