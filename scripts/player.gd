@@ -16,10 +16,22 @@ extends CharacterBody3D
 @export var air_acceleration: float = 7.0
 
 @export_category("Water")
-@export var water_gravity: float = 5.0
-@export var water_jump_velocity: float = 5.0
-@export var water_horizontal_acceleration: float = 14.0
-@export var water_friction: float = 10.0
+
+@export var water_walk_speed: float = 1.8
+@export var water_swim_speed: float = 5.6
+
+@export var water_acceleration: float = 3.5
+@export var water_swim_acceleration: float = 8.0
+
+@export var water_drag: float = 0.8
+@export var water_swim_drag: float = 0.9
+@export var water_vertical_drag: float = 0.8
+
+@export var water_sink_speed: float = 0.35
+@export var water_fast_sink_speed: float = 1.5
+
+@export var water_swim_up_speed: float = 2.5
+@export var water_swim_down_speed: float = 2.5
 
 const WATER: int = 5
 
@@ -228,15 +240,57 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func is_in_water() -> bool:
-	var water_sample_position: Vector3 = (
+	var sample_positions := [
+		global_position + Vector3(0.0, 0.15, 0.0),
 		global_position + Vector3(0.0, 0.9, 0.0)
-	)
+	]
 
+	for sample_position in sample_positions:
+		if world.get_block_world(
+			sample_position
+		) == WATER:
+			return true
+
+	return false
+
+
+func is_head_in_water() -> bool:
 	return (
 		world.get_block_world(
-			water_sample_position
+			camera.global_position
 		) == WATER
 	)
+
+
+func is_swimming() -> bool:
+	return (
+		is_in_water()
+		and is_head_in_water()
+		and Input.is_action_pressed("sprint")
+	)
+
+
+func get_swim_direction(
+	input_vector: Vector2
+) -> Vector3:
+
+	var camera_forward: Vector3 = (
+		-camera.global_transform.basis.z
+	).normalized()
+
+	var camera_right: Vector3 = (
+		camera.global_transform.basis.x
+	).normalized()
+
+	var direction: Vector3 = (
+		camera_right * input_vector.x
+		- camera_forward * input_vector.y
+	)
+
+	if direction.length_squared() > 1.0:
+		direction = direction.normalized()
+
+	return direction
 
 
 func _physics_process(delta: float) -> void:
@@ -249,33 +303,12 @@ func _physics_process(delta: float) -> void:
 		place_block()
 
 	var in_water: bool = is_in_water()
+	var head_in_water: bool = is_head_in_water()
+	var swimming: bool = (
+		in_water
+		and Input.is_action_pressed("sprint")
+	)
 
-	# Vertical movement.
-	if in_water:
-		# Water greatly reduces falling speed.
-		velocity.y = move_toward(
-			velocity.y,
-			0.0,
-			water_gravity * delta
-		)
-
-		# Jump becomes a swimming upward movement.
-		if Input.is_action_just_pressed("jump"):
-			velocity.y = water_jump_velocity
-
-	elif not is_on_floor():
-		velocity.y -= gravity * delta
-
-	else:
-		# Prevent downward velocity from accumulating while grounded.
-		if velocity.y < 0.0:
-			velocity.y = 0.0
-
-		# Normal ground jump.
-		if Input.is_action_just_pressed("jump"):
-			velocity.y = jump_velocity
-
-	# Movement input.
 	var input_vector := Input.get_vector(
 		"move_left",
 		"move_right",
@@ -283,33 +316,65 @@ func _physics_process(delta: float) -> void:
 		"move_backward"
 	)
 
+	# ---------------------------------------------------------------
+	# FOV
+	# ---------------------------------------------------------------
+
 	var target_fov := normal_fov
 
 	if (
 		Input.is_action_pressed("sprint")
 		and input_vector.length_squared() > 0.0
 	):
-		target_fov = normal_fov * sprint_fov_multiplier
+		target_fov = (
+			normal_fov *
+			sprint_fov_multiplier
+		)
 
 	camera.fov = lerp(
 		camera.fov,
 		target_fov,
-		1.0 - exp(-fov_change_speed * delta)
+		1.0 - exp(
+			-fov_change_speed * delta
+		)
 	)
+
+
+	# ---------------------------------------------------------------
+	# Direction
+	# ---------------------------------------------------------------
 
 	var direction := Vector3.ZERO
 
 	if input_vector.length_squared() > 0.0:
-		direction = (
-			transform.basis * Vector3(
-				input_vector.x,
-				0.0,
-				input_vector.y
-			)
-		).normalized()
 
-	# Prevent the player from entering a chunk that is not ready.
+		if swimming:
+
+			# Swimming uses the full camera direction.
+			direction = get_swim_direction(
+				input_vector
+			)
+
+		else:
+
+			# Normal walking/treading-water movement
+			# stays horizontal.
+			direction = (
+				transform.basis *
+				Vector3(
+					input_vector.x,
+					0.0,
+					input_vector.y
+				)
+			).normalized()
+
+
+	# ---------------------------------------------------------------
+	# Chunk entry safety
+	# ---------------------------------------------------------------
+
 	if direction != Vector3.ZERO:
+
 		var predicted_position: Vector3 = (
 			global_position +
 			direction * 0.15
@@ -335,78 +400,211 @@ func _physics_process(delta: float) -> void:
 		):
 			direction = Vector3.ZERO
 
-	# Target horizontal speed.
-	var current_speed := walk_speed
 
-	if Input.is_action_pressed("sprint"):
-		current_speed = sprint_speed
+	# ---------------------------------------------------------------
+	# WATER MOVEMENT
+	# ---------------------------------------------------------------
 
-	var target_velocity := direction * current_speed
-
-	# Horizontal movement.
 	if in_water:
-		if direction != Vector3.ZERO:
-			velocity.x = move_toward(
-				velocity.x,
-				target_velocity.x,
-				water_horizontal_acceleration * delta
+
+		if swimming:
+
+			# -------------------------------------------------------
+			# FULL SWIMMING
+			# -------------------------------------------------------
+
+			var target_velocity: Vector3 = (
+				direction *
+				water_swim_speed
 			)
 
-			velocity.z = move_toward(
-				velocity.z,
-				target_velocity.z,
-				water_horizontal_acceleration * delta
+			if direction != Vector3.ZERO:
+
+				velocity.x = move_toward(
+					velocity.x,
+					target_velocity.x,
+					water_swim_acceleration * delta
+				)
+
+				velocity.y = move_toward(
+					velocity.y,
+					target_velocity.y,
+					water_swim_acceleration * delta
+				)
+
+				velocity.z = move_toward(
+					velocity.z,
+					target_velocity.z,
+					water_swim_acceleration * delta
+				)
+
+
+			# Minecraft applies approximately 0.9 horizontal
+			# slowdown while sprint-swimming and approximately
+			# 0.8 vertical drag.
+			var swim_horizontal_drag: float = pow(
+				water_swim_drag,
+				delta * 20.0
 			)
+
+			var swim_vertical_drag: float = pow(
+				water_vertical_drag,
+				delta * 20.0
+			)
+
+			velocity.x *= swim_horizontal_drag
+			velocity.z *= swim_horizontal_drag
+			velocity.y *= swim_vertical_drag
+
+
 		else:
-			velocity.x = move_toward(
-				velocity.x,
-				0.0,
-				water_friction * delta
+
+			# -------------------------------------------------------
+			# TREADING / WADING WATER
+			# -------------------------------------------------------
+
+			var target_velocity := (
+				direction *
+				water_walk_speed
 			)
 
-			velocity.z = move_toward(
-				velocity.z,
-				0.0,
-				water_friction * delta
+			if direction != Vector3.ZERO:
+
+				velocity.x = move_toward(
+					velocity.x,
+					target_velocity.x,
+					water_acceleration * delta
+				)
+
+				velocity.z = move_toward(
+					velocity.z,
+					target_velocity.z,
+					water_acceleration * delta
+				)
+
+			else:
+
+				var horizontal_drag: float = pow(
+					water_drag,
+					delta * 20.0
+				)
+
+				velocity.x *= horizontal_drag
+				velocity.z *= horizontal_drag
+
+
+			# -------------------------------------------------------
+			# Natural sinking
+			# -------------------------------------------------------
+
+			velocity.y = move_toward(
+				velocity.y,
+				-water_sink_speed,
+				water_vertical_drag * delta
 			)
 
-	elif is_on_floor():
-		if direction != Vector3.ZERO:
-			velocity.x = move_toward(
-				velocity.x,
-				target_velocity.x,
-				ground_acceleration * delta
+
+			# -------------------------------------------------------
+			# Space = rise
+			# Shift = sink faster
+			# -------------------------------------------------------
+
+			if Input.is_action_pressed("jump"):
+
+				velocity.y = move_toward(
+					velocity.y,
+					water_swim_up_speed,
+					water_swim_up_speed * 4.0 * delta
+				)
+
+			var vertical_drag: float = pow(
+				water_vertical_drag,
+				delta * 20.0
 			)
 
-			velocity.z = move_toward(
-				velocity.z,
-				target_velocity.z,
-				ground_acceleration * delta
-			)
-		else:
-			velocity.x = move_toward(
-				velocity.x,
-				0.0,
-				ground_friction * delta
-			)
+			velocity.y *= vertical_drag
 
-			velocity.z = move_toward(
-				velocity.z,
-				0.0,
-				ground_friction * delta
-			)
+
+	# ---------------------------------------------------------------
+	# NORMAL AIR / GROUND MOVEMENT
+	# ---------------------------------------------------------------
 
 	else:
-		velocity.x = move_toward(
-			velocity.x,
-			target_velocity.x,
-			air_acceleration * delta
+
+		# Gravity
+		if not is_on_floor():
+
+			velocity.y -= gravity * delta
+
+		else:
+
+			if velocity.y < 0.0:
+				velocity.y = 0.0
+
+			if Input.is_action_just_pressed("jump"):
+				velocity.y = jump_velocity
+
+
+		# Horizontal movement
+		var current_speed := walk_speed
+
+		if Input.is_action_pressed("sprint"):
+			current_speed = sprint_speed
+
+		var target_velocity := (
+			direction *
+			current_speed
 		)
 
-		velocity.z = move_toward(
-			velocity.z,
-			target_velocity.z,
-			air_acceleration * delta
-		)
+
+		if is_on_floor():
+
+			if direction != Vector3.ZERO:
+
+				velocity.x = move_toward(
+					velocity.x,
+					target_velocity.x,
+					ground_acceleration * delta
+				)
+
+				velocity.z = move_toward(
+					velocity.z,
+					target_velocity.z,
+					ground_acceleration * delta
+				)
+
+			else:
+
+				velocity.x = move_toward(
+					velocity.x,
+					0.0,
+					ground_friction * delta
+				)
+
+				velocity.z = move_toward(
+					velocity.z,
+					0.0,
+					ground_friction * delta
+				)
+
+
+		else:
+
+			velocity.x = move_toward(
+				velocity.x,
+				target_velocity.x,
+				air_acceleration * delta
+			)
+
+			velocity.z = move_toward(
+				velocity.z,
+				target_velocity.z,
+				air_acceleration * delta
+			)
+
+
+	# ---------------------------------------------------------------
+	# Move
+	# ---------------------------------------------------------------
 
 	move_and_slide()

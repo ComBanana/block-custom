@@ -462,6 +462,22 @@ func _get_block_for_generation(
 	)
 
 
+func apply_generated_data(
+	generated_blocks: PackedByteArray
+) -> void:
+
+	blocks = generated_blocks
+
+	terrain_x = CHUNK_SIZE
+	terrain_generating = false
+
+	generation_passes_done = true
+
+	is_generated = true
+	mesh_ready = false
+	collision_ready = false
+
+
 func rebuild_mesh_immediate() -> void:
 	if not is_generated:
 		return

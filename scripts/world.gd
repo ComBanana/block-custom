@@ -23,12 +23,11 @@ const PRIORITY_FAR: int = 2
 
 
 @export_category("Streaming")
-@export var chunks_loaded_per_frame: int = 1
-
+@export var chunks_loaded_per_frame: int = 4
+@export var max_generation_tasks: int = 4
 @export var mesh_columns_per_frame: int = 4
 @export var mesh_budget_ms: float = 2.0
 @export var max_mesh_chunks_per_frame: int = 8
-
 @export var collisions_per_frame: int = 1
 @export var critical_chunk_distance: int = 2
 
@@ -46,6 +45,14 @@ var mountain_shape_noise := FastNoiseLite.new()
 @onready var loading_screen: Control = $"../LoadingLayer/LoadingScreen"
 
 var chunk_scene := preload("res://scenes/Chunk.tscn")
+
+const TERRAIN_GENERATOR := preload(
+	"res://scripts/terrain_generator.gd"
+)
+
+class GenerationResult:
+	var blocks: PackedByteArray
+	var chunk_coordinate: Vector2i
 
 
 # ===================================================================
@@ -79,6 +86,8 @@ var critical_generation_queued: Dictionary = {}
 
 var generation_queue: Array[Vector2i] = []
 var generation_queued: Dictionary = {}
+
+var generation_tasks: Dictionary = {}
 
 
 # ===================================================================
@@ -455,6 +464,19 @@ func load_chunk(
 		generation_queued[chunk_coord] = true
 
 
+func _generate_chunk_worker(
+	result: GenerationResult,
+	chunk_coordinate: Vector2i
+) -> void:
+
+	result.chunk_coordinate = chunk_coordinate
+	result.blocks = (
+		TERRAIN_GENERATOR.generate_chunk_data(
+			chunk_coordinate
+		)
+	)
+
+
 # ===================================================================
 # Terrain generation
 # ===================================================================
@@ -462,10 +484,187 @@ func load_chunk(
 func process_generation_queue() -> void:
 
 	# ---------------------------------------------------------------
+	# COLLECT COMPLETED WORKER TASKS
+	# ---------------------------------------------------------------
+
+	var completed_tasks: Array[int] = []
+
+	for task_id in generation_tasks:
+
+		if WorkerThreadPool.is_task_completed(
+			task_id
+		):
+			completed_tasks.append(
+				task_id
+			)
+
+
+	for task_id in completed_tasks:
+
+		var result: GenerationResult = (
+			generation_tasks[task_id]
+		)
+
+		var wait_error: Error = (
+			WorkerThreadPool.wait_for_task_completion(
+				task_id
+			)
+		)
+
+		generation_tasks.erase(
+			task_id
+		)
+
+		if wait_error != OK:
+			push_error(
+				"Chunk generation task failed: "
+				+ str(wait_error)
+			)
+			continue
+
+
+		var chunk_coord: Vector2i = (
+			result.chunk_coordinate
+		)
+
+		var generated_data: PackedByteArray = (
+			result.blocks
+		)
+
+
+		# The chunk may have been unloaded while the
+		# worker was generating it.
+		if not loaded_chunks.has(
+			chunk_coord
+		):
+			continue
+
+
+		# The player may have moved away while the
+		# worker was generating it.
+		if not required_chunks.has(
+			chunk_coord
+		):
+			continue
+
+
+		var chunk = loaded_chunks[
+			chunk_coord
+		]
+
+
+		if chunk.is_generated:
+			continue
+
+
+		chunk.apply_generated_data(
+			generated_data
+		)
+
+
+		enqueue_mesh_chunk(
+			chunk_coord
+		)
+
+
+		enqueue_neighbor_meshes(
+			chunk_coord
+		)
+
+
+	# ---------------------------------------------------------------
+	# SUBMIT NEW GENERATION TASKS
+	# ---------------------------------------------------------------
+
+	if max_generation_tasks <= 0:
+		return
+
+
+	while (
+		generation_tasks.size()
+		< max_generation_tasks
+	):
+
+		var chunk_coord: Vector2i = (
+			get_next_generation_candidate()
+		)
+
+
+		if chunk_coord == INVALID_CHUNK:
+			return
+
+
+		if not loaded_chunks.has(
+			chunk_coord
+		):
+			continue
+
+
+		if not required_chunks.has(
+			chunk_coord
+		):
+			continue
+
+
+		var chunk = loaded_chunks[
+			chunk_coord
+		]
+
+
+		if chunk.is_generated:
+			continue
+
+
+		var result := GenerationResult.new()
+
+		result.chunk_coordinate = (
+			chunk_coord
+		)
+
+
+		var generation_callable: Callable = (
+			Callable(
+				self,
+				"_generate_chunk_worker"
+			).bind(
+				result,
+				chunk_coord
+			)
+		)
+
+
+		var high_priority: bool = (
+			is_chunk_critical(
+				chunk_coord
+			)
+		)
+
+
+		var task_id: int = (
+			WorkerThreadPool.add_task(
+				generation_callable,
+				high_priority,
+				"Generate chunk (%d, %d)"
+				% [
+					chunk_coord.x,
+					chunk_coord.y
+				]
+			)
+		)
+
+
+		generation_tasks[
+			task_id
+		] = result
+
+
+func get_next_generation_candidate() -> Vector2i:
+
+	# ---------------------------------------------------------------
 	# CRITICAL GENERATION
 	# ---------------------------------------------------------------
 
-	if not critical_generation_queue.is_empty():
+	while not critical_generation_queue.is_empty():
 
 		var critical_coord: Vector2i = (
 			critical_generation_queue.pop_front()
@@ -475,95 +674,92 @@ func process_generation_queue() -> void:
 			critical_coord
 		)
 
-		if loaded_chunks.has(
+
+		if not loaded_chunks.has(
 			critical_coord
 		):
+			continue
 
-			var critical_chunk = loaded_chunks[
-				critical_coord
-			]
 
-			if (
-				required_chunks.has(
-					critical_coord
-				)
-				and not critical_chunk.is_generated
-			):
+		if not required_chunks.has(
+			critical_coord
+		):
+			continue
 
-				critical_chunk.generate_terrain()
-				critical_chunk.is_generated = true
 
-				enqueue_mesh_chunk(
-					critical_coord
-				)
+		var critical_chunk = loaded_chunks[
+			critical_coord
+		]
 
-				enqueue_neighbor_meshes(
-					critical_coord
-				)
 
-		return
+		if critical_chunk.is_generated:
+			continue
+
+
+		return critical_coord
 
 
 	# ---------------------------------------------------------------
 	# NORMAL GENERATION
 	# ---------------------------------------------------------------
 
-	if generation_queue.is_empty():
-		return
+	while not generation_queue.is_empty():
 
-	var chunk_coord: Vector2i = (
-		generation_queue.pop_front()
-	)
+		var chunk_coord: Vector2i = (
+			generation_queue.pop_front()
+		)
 
-	generation_queued.erase(
-		chunk_coord
-	)
+		generation_queued.erase(
+			chunk_coord
+		)
 
-	if not loaded_chunks.has(
-		chunk_coord
-	):
-		return
 
-	if not required_chunks.has(
-		chunk_coord
-	):
-		return
+		if not loaded_chunks.has(
+			chunk_coord
+		):
+			continue
 
-	var chunk = loaded_chunks[
-		chunk_coord
-	]
 
-	if chunk.is_generated:
-		return
+		if not required_chunks.has(
+			chunk_coord
+		):
+			continue
 
-	# If the player has moved close enough to this chunk while it
-	# was waiting in the normal queue, promote it immediately.
-	if is_chunk_critical(chunk_coord):
 
-		if not critical_generation_queued.has(
+		var chunk = loaded_chunks[
+			chunk_coord
+		]
+
+
+		if chunk.is_generated:
+			continue
+
+
+		# A chunk can become critical while waiting in
+		# the normal queue.
+		if is_chunk_critical(
 			chunk_coord
 		):
 
-			critical_generation_queue.append(
+			if not critical_generation_queued.has(
 				chunk_coord
-			)
+			):
 
-			critical_generation_queued[
-				chunk_coord
-			] = true
+				critical_generation_queue.push_back(
+					chunk_coord
+				)
 
-		return
+				critical_generation_queued[
+					chunk_coord
+				] = true
 
-	chunk.generate_terrain()
-	chunk.is_generated = true
+			continue
 
-	enqueue_mesh_chunk(
-		chunk_coord
-	)
 
-	enqueue_neighbor_meshes(
-		chunk_coord
-	)
+		return chunk_coord
+
+
+	return INVALID_CHUNK
 
 
 # ===================================================================
@@ -1340,3 +1536,22 @@ func try_spawn_player() -> void:
 	player.enable_controls()
 
 	loading_screen.finish()
+
+
+func _exit_tree() -> void:
+
+	for task_id in generation_tasks:
+
+		var wait_error: Error = (
+			WorkerThreadPool.wait_for_task_completion(
+				task_id
+			)
+		)
+
+		if wait_error != OK:
+			push_warning(
+				"Chunk generation task shutdown error: "
+				+ str(wait_error)
+			)
+
+	generation_tasks.clear()
