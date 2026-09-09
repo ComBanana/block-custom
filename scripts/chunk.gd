@@ -15,7 +15,11 @@ const STONE_TEXTURE := preload("res://textures/stone.png")
 var blocks := PackedByteArray()
 
 var chunk_coordinate := Vector2i.ZERO
+
 var terrain_noise: FastNoiseLite
+var hill_noise: FastNoiseLite
+var mountain_region_noise: FastNoiseLite
+var mountain_shape_noise: FastNoiseLite
 
 var is_generated: bool = false
 var terrain_generating: bool = false
@@ -125,16 +129,70 @@ func process_terrain_generation_step(
 				z
 			)
 
-			var noise_value: float = (
+			var base_value: float = (
 				terrain_noise.get_noise_2d(
 					world_x,
 					world_z
 				)
 			)
 
-			var height: int = (
-				12 +
-				roundi(noise_value * 8.0)
+			var hill_value: float = (
+				hill_noise.get_noise_2d(
+					world_x,
+					world_z
+				)
+			)
+
+			var mountain_region_value: float = (
+				mountain_region_noise.get_noise_2d(
+					world_x,
+					world_z
+				)
+			)
+
+			var mountain_shape_value: float = (
+				mountain_shape_noise.get_noise_2d(
+					world_x,
+					world_z
+				)
+			)
+
+			var base_height: float = (
+				12.0 +
+				base_value * 4.0
+			)
+
+			var hill_height: float = (
+				hill_value * 5.0
+			)
+
+			# Convert the mountain-region noise from roughly [-1, 1]
+			# into a smooth 0-1 mask.
+			var mountain_mask: float = (
+				mountain_region_value * 0.5
+			) + 0.5
+
+			mountain_mask = smoothstep(
+				0.58,
+				0.78,
+				mountain_mask
+			)
+
+			# Ridged noise gives the mountain area its actual relief.
+			var mountain_height: float = (
+				mountain_shape_value * 28.0
+			)
+
+			var height_float: float = (
+				base_height +
+				hill_height +
+				(mountain_height * mountain_mask)
+			)
+
+			var height: int = clampi(
+				roundi(height_float),
+				4,
+				CHUNK_HEIGHT
 			)
 
 			height = clampi(

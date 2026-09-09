@@ -38,6 +38,9 @@ const PRIORITY_FAR: int = 2
 
 
 var terrain_noise := FastNoiseLite.new()
+var hill_noise := FastNoiseLite.new()
+var mountain_region_noise := FastNoiseLite.new()
+var mountain_shape_noise := FastNoiseLite.new()
 
 @onready var player: CharacterBody3D = $"../Player"
 @onready var loading_screen: Control = $"../LoadingLayer/LoadingScreen"
@@ -122,7 +125,34 @@ var player_spawned: bool = false
 func _ready() -> void:
 	terrain_noise.seed = 12345
 	terrain_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	terrain_noise.frequency = 0.015
+	terrain_noise.frequency = 0.0075
+	terrain_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	terrain_noise.fractal_octaves = 3
+	terrain_noise.fractal_gain = 0.45
+
+
+	hill_noise.seed = 23456
+	hill_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	hill_noise.frequency = 0.018
+	hill_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	hill_noise.fractal_octaves = 2
+	hill_noise.fractal_gain = 0.45
+
+
+	mountain_region_noise.seed = 34567
+	mountain_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	mountain_region_noise.frequency = 0.0035
+	mountain_region_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	mountain_region_noise.fractal_octaves = 2
+	mountain_region_noise.fractal_gain = 0.5
+
+
+	mountain_shape_noise.seed = 45678
+	mountain_shape_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	mountain_shape_noise.frequency = 0.009
+	mountain_shape_noise.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	mountain_shape_noise.fractal_octaves = 3
+	mountain_shape_noise.fractal_gain = 0.5
 
 	player.set_physics_process(false)
 	player.velocity = Vector3.ZERO
@@ -397,7 +427,11 @@ func load_chunk(
 	)
 
 	chunk.chunk_coordinate = chunk_coord
+
 	chunk.terrain_noise = terrain_noise
+	chunk.hill_noise = hill_noise
+	chunk.mountain_region_noise = mountain_region_noise
+	chunk.mountain_shape_noise = mountain_shape_noise
 
 	loaded_chunks[chunk_coord] = chunk
 
