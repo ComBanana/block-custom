@@ -42,6 +42,9 @@ var normal_fov: float
 
 var controls_enabled: bool = false
 
+var break_requested: bool = false
+var place_requested: bool = false
+
 
 func get_block_target() -> Dictionary:
 	var origin := camera.global_position
@@ -171,10 +174,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			break_block()
+			break_requested = true
 
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			place_block()
+			place_requested = true
 
 	if event is InputEventMouseMotion:
 		rotate_y(-event.relative.x * mouse_sensitivity)
@@ -217,6 +220,14 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if break_requested:
+		break_requested = false
+		break_block()
+
+	if place_requested:
+		place_requested = false
+		place_block()
+
 	# Gravity
 	if not is_on_floor():
 		velocity.y -= gravity * delta

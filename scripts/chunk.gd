@@ -1,7 +1,7 @@
 extends Node3D
 
 const CHUNK_SIZE: int = 16
-const CHUNK_HEIGHT: int = 24
+const CHUNK_HEIGHT: int = 64
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -18,11 +18,12 @@ var chunk_coordinate := Vector2i.ZERO
 var terrain_noise: FastNoiseLite
 
 var is_generated: bool = false
-
+var terrain_generating: bool = false
 var mesh_building: bool = false
 var mesh_ready: bool = false
 var collision_ready: bool = false
 
+var terrain_x: int = 0
 var mesh_x: int = 0
 
 var grass_tool: SurfaceTool
@@ -78,31 +79,62 @@ func get_block(x: int, y: int, z: int) -> int:
 	return blocks[_get_index(x, y, z)]
 
 
-func generate_terrain() -> void:
+func begin_terrain_generation() -> void:
 	blocks.resize(
-		CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
+		CHUNK_SIZE *
+		CHUNK_HEIGHT *
+		CHUNK_SIZE
 	)
 
 	blocks.fill(AIR)
 
-	for x in range(CHUNK_SIZE):
+	terrain_x = 0
+	terrain_generating = true
+
+	is_generated = false
+	mesh_ready = false
+	collision_ready = false
+
+
+func process_terrain_generation_step(
+	max_columns: int,
+	budget_ms: float
+) -> void:
+
+	if not terrain_generating:
+		begin_terrain_generation()
+
+	var start_usec: int = Time.get_ticks_usec()
+	var columns_done: int = 0
+
+	while terrain_x < CHUNK_SIZE:
+
+		var x: int = terrain_x
+
 		for z in range(CHUNK_SIZE):
 
-			var world_x := (
-				chunk_coordinate.x * CHUNK_SIZE + x
+			var world_x: int = (
+				chunk_coordinate.x *
+				CHUNK_SIZE +
+				x
 			)
 
-			var world_z := (
-				chunk_coordinate.y * CHUNK_SIZE + z
+			var world_z: int = (
+				chunk_coordinate.y *
+				CHUNK_SIZE +
+				z
 			)
 
-			var noise_value := terrain_noise.get_noise_2d(
-				world_x,
-				world_z
+			var noise_value: float = (
+				terrain_noise.get_noise_2d(
+					world_x,
+					world_z
+				)
 			)
 
-			var height := (
-				12 + roundi(noise_value * 8.0)
+			var height: int = (
+				12 +
+				roundi(noise_value * 8.0)
 			)
 
 			height = clampi(
@@ -112,7 +144,9 @@ func generate_terrain() -> void:
 			)
 
 			for y in range(height):
+
 				if y == height - 1:
+
 					set_block(
 						x,
 						y,
@@ -121,6 +155,7 @@ func generate_terrain() -> void:
 					)
 
 				elif y >= height - 4:
+
 					set_block(
 						x,
 						y,
@@ -129,12 +164,61 @@ func generate_terrain() -> void:
 					)
 
 				else:
+
 					set_block(
 						x,
 						y,
 						z,
 						STONE
 					)
+
+		terrain_x += 1
+		columns_done += 1
+
+		var elapsed_ms: float = (
+			float(
+				Time.get_ticks_usec() -
+				start_usec
+			) / 1000.0
+		)
+
+		if columns_done >= max_columns:
+			break
+
+		if elapsed_ms >= budget_ms:
+			break
+
+	if terrain_x >= CHUNK_SIZE:
+		terrain_generating = false
+		is_generated = true
+
+
+func generate_terrain() -> void:
+	begin_terrain_generation()
+
+	while terrain_generating:
+		process_terrain_generation_step(
+			CHUNK_SIZE,
+			1000000.0
+		)
+
+
+func rebuild_mesh_immediate() -> void:
+	if not is_generated:
+		return
+
+	# Throw away any partially generated mesh.
+	if mesh_building:
+		cancel_mesh_build()
+
+	begin_mesh_build()
+
+	# A block edit is a foreground operation.
+	# Build all 16 columns in one pass.
+	process_mesh_step(
+		CHUNK_SIZE,
+		1000000.0
+	)
 
 
 func cancel_mesh_build() -> void:
