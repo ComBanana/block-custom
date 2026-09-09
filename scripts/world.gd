@@ -9,6 +9,10 @@ const GRASS: int = 1
 
 const INVALID_CHUNK := Vector2i(999999, 999999)
 
+const PRIORITY_PLAYER: int = 0
+const PRIORITY_NEAR: int = 1
+const PRIORITY_FAR: int = 2
+
 
 @export_category("World")
 @export var render_distance: int = 12
@@ -26,6 +30,7 @@ const INVALID_CHUNK := Vector2i(999999, 999999)
 @export var max_mesh_chunks_per_frame: int = 8
 
 @export var collisions_per_frame: int = 1
+@export var critical_chunk_distance: int = 2
 
 
 @export_category("Collision")
@@ -66,6 +71,9 @@ var load_queued: Dictionary = {}
 # Terrain generation
 # ===================================================================
 
+var critical_generation_queue: Array[Vector2i] = []
+var critical_generation_queued: Dictionary = {}
+
 var generation_queue: Array[Vector2i] = []
 var generation_queued: Dictionary = {}
 
@@ -80,11 +88,16 @@ var generation_queued: Dictionary = {}
 var player_edit_queue: Array[Vector2i] = []
 var player_edit_queued: Dictionary = {}
 
+var critical_mesh_queue: Array[Vector2i] = []
+var critical_mesh_queued: Dictionary = {}
+
 var near_mesh_queue: Array[Vector2i] = []
 var near_mesh_queued: Dictionary = {}
 
 var far_mesh_queue: Array[Vector2i] = []
 var far_mesh_queued: Dictionary = {}
+
+var active_mesh_priority: int = PRIORITY_FAR
 
 
 # ===================================================================
@@ -181,6 +194,35 @@ func is_chunk_within_collision_distance(
 	)
 
 
+func is_chunk_ready_for_player(
+	chunk_coord: Vector2i
+) -> bool:
+
+	if not loaded_chunks.has(
+		chunk_coord
+	):
+		return false
+
+	var chunk = loaded_chunks[
+		chunk_coord
+	]
+
+	return (
+		chunk.is_generated
+		and chunk.mesh_ready
+		and chunk.collision_ready
+	)
+
+
+func can_player_enter_chunk(
+	chunk_coord: Vector2i
+) -> bool:
+
+	return is_chunk_ready_for_player(
+		chunk_coord
+	)
+
+
 func get_chunk_stream_priority(
 	chunk_coord: Vector2i
 ) -> int:
@@ -200,6 +242,22 @@ func get_chunk_stream_priority(
 
 	return 2
 
+
+func is_chunk_critical(
+	chunk_coord: Vector2i
+) -> bool:
+	var dx: int = abs(
+		chunk_coord.x - player_chunk.x
+	)
+
+	var dz: int = abs(
+		chunk_coord.y - player_chunk.y
+	)
+
+	return (
+		dx <= critical_chunk_distance
+		and dz <= critical_chunk_distance
+	)
 
 # ===================================================================
 # Required chunks
@@ -346,11 +404,21 @@ func load_chunk(
 	add_child(chunk)
 
 	# The current chunk.gd still uses the original generate_terrain().
-	generation_queue.append(
-		chunk_coord
-	)
+	if is_chunk_critical(chunk_coord):
 
-	generation_queued[chunk_coord] = true
+		critical_generation_queue.append(
+			chunk_coord
+		)
+
+		critical_generation_queued[chunk_coord] = true
+
+	else:
+
+		generation_queue.append(
+			chunk_coord
+		)
+
+		generation_queued[chunk_coord] = true
 
 
 # ===================================================================
@@ -358,6 +426,53 @@ func load_chunk(
 # ===================================================================
 
 func process_generation_queue() -> void:
+
+	# ---------------------------------------------------------------
+	# CRITICAL GENERATION
+	# ---------------------------------------------------------------
+
+	if not critical_generation_queue.is_empty():
+
+		var critical_coord: Vector2i = (
+			critical_generation_queue.pop_front()
+		)
+
+		critical_generation_queued.erase(
+			critical_coord
+		)
+
+		if loaded_chunks.has(
+			critical_coord
+		):
+
+			var critical_chunk = loaded_chunks[
+				critical_coord
+			]
+
+			if (
+				required_chunks.has(
+					critical_coord
+				)
+				and not critical_chunk.is_generated
+			):
+
+				critical_chunk.generate_terrain()
+				critical_chunk.is_generated = true
+
+				enqueue_mesh_chunk(
+					critical_coord
+				)
+
+				enqueue_neighbor_meshes(
+					critical_coord
+				)
+
+		return
+
+
+	# ---------------------------------------------------------------
+	# NORMAL GENERATION
+	# ---------------------------------------------------------------
 
 	if generation_queue.is_empty():
 		return
@@ -387,8 +502,24 @@ func process_generation_queue() -> void:
 	if chunk.is_generated:
 		return
 
-	# Your current chunk.gd has one complete generate_terrain()
-	# call, so keep generation separate from the mesh queue.
+	# If the player has moved close enough to this chunk while it
+	# was waiting in the normal queue, promote it immediately.
+	if is_chunk_critical(chunk_coord):
+
+		if not critical_generation_queued.has(
+			chunk_coord
+		):
+
+			critical_generation_queue.append(
+				chunk_coord
+			)
+
+			critical_generation_queued[
+				chunk_coord
+			] = true
+
+		return
+
 	chunk.generate_terrain()
 	chunk.is_generated = true
 
@@ -457,6 +588,23 @@ func enqueue_mesh_chunk(
 	]
 
 	if not chunk.is_generated:
+		return
+	
+	if is_chunk_critical(chunk_coord):
+
+		if critical_mesh_queued.has(
+			chunk_coord
+		):
+			return
+
+		critical_mesh_queue.append(
+			chunk_coord
+		)
+
+		critical_mesh_queued[
+			chunk_coord
+		] = true
+
 		return
 
 	if chunk.mesh_building:
@@ -551,9 +699,7 @@ func enqueue_player_edit(
 func process_mesh_queue() -> void:
 
 	var start_usec: int = Time.get_ticks_usec()
-
 	var processed_chunks: int = 0
-
 
 	while (
 		processed_chunks < max_mesh_chunks_per_frame
@@ -569,7 +715,6 @@ func process_mesh_queue() -> void:
 		if elapsed_ms >= mesh_budget_ms:
 			return
 
-
 		var chunk_coord: Vector2i = (
 			get_next_mesh_candidate()
 		)
@@ -577,55 +722,58 @@ func process_mesh_queue() -> void:
 		if chunk_coord == INVALID_CHUNK:
 			return
 
-
 		if not loaded_chunks.has(
 			chunk_coord
 		):
 			continue
 
-
 		var chunk = loaded_chunks[
 			chunk_coord
 		]
 
-
 		if not chunk.is_generated:
 			continue
-
 
 		var remaining_ms: float = (
 			mesh_budget_ms - elapsed_ms
 		)
 
-
 		if not chunk.mesh_building:
 			chunk.begin_mesh_build()
-
 
 		chunk.process_mesh_step(
 			mesh_columns_per_frame,
 			remaining_ms
 		)
 
-
 		if chunk.mesh_building:
 
 			# The chunk did not finish this frame.
-			# Put it back into the appropriate queue.
+			# Put it back into the appropriate priority queue.
 
-			if chunk_coord in player_edit_queued:
+			if player_edit_queued.has(chunk_coord):
 
 				player_edit_queue.push_back(
 					chunk_coord
 				)
 
-			elif get_chunk_stream_priority(
-				chunk_coord
-			) == 1:
+				player_edit_queued[chunk_coord] = true
+
+			elif is_chunk_critical(chunk_coord):
+
+				critical_mesh_queue.push_back(
+					chunk_coord
+				)
+
+				critical_mesh_queued[chunk_coord] = true
+
+			elif get_chunk_stream_priority(chunk_coord) == PRIORITY_NEAR:
 
 				near_mesh_queue.push_back(
 					chunk_coord
 				)
+
+				near_mesh_queued[chunk_coord] = true
 
 			else:
 
@@ -633,12 +781,13 @@ func process_mesh_queue() -> void:
 					chunk_coord
 				)
 
+				far_mesh_queued[chunk_coord] = true
+
 		else:
 
 			enqueue_collision_chunk(
 				chunk_coord
 			)
-
 
 		processed_chunks += 1
 
@@ -649,7 +798,10 @@ func process_mesh_queue() -> void:
 
 func get_next_mesh_candidate() -> Vector2i:
 
-	# Player edits always win.
+	# ---------------------------------------------------------------
+	# PLAYER EDIT
+	# ---------------------------------------------------------------
+
 	while not player_edit_queue.is_empty():
 
 		var player_coord: Vector2i = (
@@ -665,10 +817,39 @@ func get_next_mesh_candidate() -> Vector2i:
 			player_coord
 		)
 
+		active_mesh_priority = PRIORITY_PLAYER
+
 		return player_coord
 
 
-	# Nearby streaming second.
+	# ---------------------------------------------------------------
+	# CRITICAL
+	# ---------------------------------------------------------------
+
+	while not critical_mesh_queue.is_empty():
+
+		var critical_coord: Vector2i = (
+			critical_mesh_queue.pop_front()
+		)
+
+		if not critical_mesh_queued.has(
+			critical_coord
+		):
+			continue
+
+		critical_mesh_queued.erase(
+			critical_coord
+		)
+
+		active_mesh_priority = PRIORITY_NEAR
+
+		return critical_coord
+
+
+	# ---------------------------------------------------------------
+	# NEAR
+	# ---------------------------------------------------------------
+
 	while not near_mesh_queue.is_empty():
 
 		var near_coord: Vector2i = (
@@ -684,10 +865,15 @@ func get_next_mesh_candidate() -> Vector2i:
 			near_coord
 		)
 
+		active_mesh_priority = PRIORITY_NEAR
+
 		return near_coord
 
 
-	# Far streaming last.
+	# ---------------------------------------------------------------
+	# FAR
+	# ---------------------------------------------------------------
+
 	while not far_mesh_queue.is_empty():
 
 		var far_coord: Vector2i = (
@@ -702,6 +888,8 @@ func get_next_mesh_candidate() -> Vector2i:
 		far_mesh_queued.erase(
 			far_coord
 		)
+
+		active_mesh_priority = PRIORITY_FAR
 
 		return far_coord
 
@@ -742,11 +930,21 @@ func enqueue_collision_chunk(
 	):
 		return
 
-	collision_queue.append(
-		chunk_coord
-	)
+	if is_chunk_critical(chunk_coord):
 
-	collision_queued[chunk_coord] = true
+		collision_queue.push_front(
+			chunk_coord
+		)
+
+	else:
+
+		collision_queue.append(
+			chunk_coord
+		)
+
+	collision_queued[
+		chunk_coord
+	] = true
 
 
 func update_collision_range() -> void:
@@ -1006,40 +1204,27 @@ func get_spawn_area_total() -> int:
 
 
 func get_spawn_area_ready() -> int:
-
 	var ready_count: int = 0
 
 	for x in range(
 		-spawn_load_radius,
 		spawn_load_radius + 1
 	):
-
 		for z in range(
 			-spawn_load_radius,
 			spawn_load_radius + 1
 		):
+			var chunk_coord := Vector2i(x, z)
 
-			var chunk_coord := Vector2i(
-				x,
-				z
-			)
-
-			if not loaded_chunks.has(
-				chunk_coord
-			):
+			if not loaded_chunks.has(chunk_coord):
 				continue
 
-			var chunk = loaded_chunks[
-				chunk_coord
-			]
+			var chunk = loaded_chunks[chunk_coord]
 
 			if not chunk.is_generated:
 				continue
 
 			if not chunk.mesh_ready:
-				continue
-
-			if not chunk.collision_ready:
 				continue
 
 			ready_count += 1
@@ -1082,6 +1267,10 @@ func try_spawn_player() -> void:
 	var spawn_chunk = loaded_chunks[
 		spawn_chunk_coord
 	]
+
+	# The central chunk must have collision before the player is released.
+	if not spawn_chunk.collision_ready:
+		return
 
 	var spawn_x: int = 8
 	var spawn_z: int = 8

@@ -270,6 +270,35 @@ func _physics_process(delta: float) -> void:
 			)
 		).normalized()
 
+	# Prevent the player from entering a chunk that is not ready.
+	if direction != Vector3.ZERO:
+
+		var predicted_position: Vector3 = (
+			global_position +
+			direction * 0.15
+		)
+
+		var current_chunk: Vector2i = (
+			world.world_to_chunk(
+				global_position
+			)
+		)
+
+		var predicted_chunk: Vector2i = (
+			world.world_to_chunk(
+				predicted_position
+			)
+		)
+
+		if (
+			predicted_chunk != current_chunk
+			and not world.can_player_enter_chunk(
+				predicted_chunk
+			)
+		):
+
+			direction = Vector3.ZERO
+	
 	# Target horizontal speed
 	var current_speed := walk_speed
 
