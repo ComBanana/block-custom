@@ -275,16 +275,21 @@ func _update_swim_crawl_state(
 
 	if swimming_mode:
 
-		# Stay low while still in water.
-		if in_water:
+		var moving_forward: bool = Input.is_action_pressed(
+			"move_forward"
+		)
+
+		# Keep swim mode latched while W is held. Physical sprint
+		# input no longer matters once swimming has started.
+		if in_water and moving_forward:
 			_set_swim_crawl_pose()
 			return
 
-		# We have left the water.
+		# Leaving the water OR releasing W ends swim mode.
 		swimming_mode = false
 
-		# Minecraft keeps the low posture when there isn't
-		# enough room to stand up.
+		# Preserve the low posture if the surrounding blocks prevent
+		# the player from standing normally.
 		if _can_stand_up():
 			crawling_mode = false
 			_set_standing_pose()
@@ -331,6 +336,7 @@ func _update_swim_crawl_state(
 		in_water
 		and head_in_water
 		and sprinting
+		and Input.is_action_pressed("move_forward")
 	):
 		swimming_mode = true
 		_set_swim_crawl_pose()
@@ -446,11 +452,7 @@ func _can_water_edge_jump() -> bool:
 
 
 func is_swimming() -> bool:
-	return (
-		is_in_water()
-		and is_head_in_water()
-		and Input.is_action_pressed("sprint")
-	)
+	return swimming_mode
 
 
 func get_swim_direction(
@@ -514,10 +516,15 @@ func _physics_process(delta: float) -> void:
 	# FOV
 	# ---------------------------------------------------------------
 
+	var effective_sprinting: bool = (
+		sprinting
+		or swimming
+	)
+
 	var target_fov := normal_fov
 
 	if (
-		sprinting
+		effective_sprinting
 		and input_vector.length_squared() > 0.0
 	):
 		target_fov = (
@@ -627,21 +634,29 @@ func _physics_process(delta: float) -> void:
 
 		# Java's updateVelocity adds 0.02 blocks/tick of movement
 		# acceleration before fluid drag.
-		var water_input := direction * (
-			water_acceleration_per_tick * 20.0
-		)
 
 		# Jumping and sneaking in water are +/-0.04 blocks/tick
 		# impulses, applied before the same vertical drag.
 		var water_vertical_input: float = 0.0
 
-		if Input.is_action_pressed("jump"):
+		if is_crouching:
+			# While swimming, Shift is an explicit DOWN control.
+			# It overrides camera pitch and the jump key.
+			water_vertical_input -= (
+				water_sneak_impulse_per_tick * 20.0
+			)
+		elif Input.is_action_pressed("jump"):
 			water_vertical_input += (
 				water_jump_impulse_per_tick * 20.0
 			)
-		elif is_crouching:
-			water_vertical_input -= (
-				water_sneak_impulse_per_tick * 20.0
+		elif swimming:
+			# Swimming follows the camera pitch. This uses the same
+			# 0.02/tick water acceleration as the horizontal movement.
+			water_vertical_input += (
+				direction.y *
+				water_acceleration_per_tick *
+				water_swim_drag *
+				20.0
 			)
 
 		var horizontal_drag_factor: float = pow(
@@ -786,12 +801,19 @@ func _physics_process(delta: float) -> void:
 	# Water → shore hop
 	# ---------------------------------------------------------------
 
-	# Java's fluid travel can produce a 0.3-block/tick upward escape
-	# when the player hits a wall and the upward path is clear.
+	# Re-check the water state after movement. The shore hop is
+	# deliberately tested here so it can only happen on an actual
+	# water -> land transition, never merely from touching a wall
+	# while still underwater.
+	var post_move_in_water: bool = is_in_water()
+	var post_move_head_in_water: bool = is_head_in_water()
+
 	if (
 		in_water
-		and swimming
+		and head_in_water
+		and moving_forward
 		and Input.is_action_pressed("jump")
+		and not post_move_in_water
 		and _can_water_edge_jump()
 	):
 		velocity.y = (
@@ -800,9 +822,6 @@ func _physics_process(delta: float) -> void:
 
 	# Re-check the pose after movement so leaving the water
 	# immediately transitions to standing or crawling.
-	var post_move_in_water: bool = is_in_water()
-	var post_move_head_in_water: bool = is_head_in_water()
-
 	if (
 		post_move_in_water != in_water
 		or post_move_head_in_water != head_in_water
