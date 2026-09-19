@@ -20,12 +20,17 @@ extends Control
 @onready var window_mode_option: OptionButton = $Center/SettingsPanel/VBox/WindowModeRow/WindowModeOption
 
 var worlds: Array[Dictionary] = []
+var legacy_migration_dialog: ConfirmationDialog
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	get_tree().paused = false
 	_show_panel(main_panel)
+
+	if WorldStore.has_legacy_worlds():
+		call_deferred("_show_legacy_world_migration_dialog")
+
 	_refresh_worlds()
 	_load_settings_ui()
 
@@ -67,7 +72,12 @@ func _refresh_worlds() -> void:
 	world_list.clear()
 	for world_data in worlds:
 		var seed_value: int = int(world_data.get("seed", 0))
-		world_list.add_item("%s    (seed %d)" % [str(world_data.get("name", "World")), seed_value])
+		world_list.add_item(
+			"%s    (seed %d)" % [
+				str(world_data.get("name", "World")),
+				seed_value
+			]
+		)
 	play_world_button.disabled = worlds.is_empty()
 	delete_world_button.disabled = worlds.is_empty()
 	if not worlds.is_empty():
@@ -154,3 +164,72 @@ func _on_fov_changed(value: float) -> void:
 
 func _on_window_mode_changed(index: int) -> void:
 	GameSettings.set_fullscreen(index == 1)
+
+
+func _show_legacy_world_migration_dialog() -> void:
+	if legacy_migration_dialog != null:
+		return
+
+	legacy_migration_dialog = ConfirmationDialog.new()
+	legacy_migration_dialog.title = "World Save Migration"
+	legacy_migration_dialog.ok_button_text = "Move Worlds & Delete Old Folder"
+	legacy_migration_dialog.cancel_button_text = "Keep Old Folder"
+	legacy_migration_dialog.dialog_text = (
+		"BlockCraft found worlds in the old save location:\n\n"
+		+ WorldStore.legacy_worlds_display_path()
+		+ "\n\n"
+		+ "These worlds can be moved to the new save location:\n"
+		+ WorldStore.worlds_display_path()
+		+ "\n\n"
+		+ "Choose Move Worlds & Delete Old Folder to move the old worlds "
+		+ "and delete the old worlds folder.\n\n"
+		+ "Choose Keep Old Folder to leave the old worlds where they are. "
+		+ "They will remain playable, and any new worlds will still save "
+		+ "to the new location."
+	)
+	legacy_migration_dialog.size = Vector2i(760, 360)
+	legacy_migration_dialog.confirmed.connect(
+		_on_confirm_legacy_world_migration
+	)
+	legacy_migration_dialog.canceled.connect(
+		_on_cancel_legacy_world_migration
+	)
+	add_child(legacy_migration_dialog)
+	legacy_migration_dialog.popup_centered()
+
+
+func _on_confirm_legacy_world_migration() -> void:
+	var result := WorldStore.migrate_legacy_worlds()
+
+	if result.get("success", false):
+		_refresh_worlds()
+		return
+
+	var failed_worlds: Array = result.get(
+		"failed_worlds",
+		[]
+	)
+	var details := ""
+	if not failed_worlds.is_empty():
+		details = "\n\nCould not move/delete:\n" + "\n".join(
+			PackedStringArray(failed_worlds)
+		)
+
+	var error_dialog := AcceptDialog.new()
+	error_dialog.title = "World Migration Incomplete"
+	error_dialog.dialog_text = (
+		"Some old worlds could not be migrated. "
+		+ "No remaining old worlds were deleted."
+		+ details
+	)
+	error_dialog.size = Vector2i(650, 260)
+	error_dialog.confirmed.connect(
+		func(): error_dialog.queue_free()
+	)
+	add_child(error_dialog)
+	error_dialog.popup_centered()
+	_refresh_worlds()
+
+
+func _on_cancel_legacy_world_migration() -> void:
+	_refresh_worlds()
