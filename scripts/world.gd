@@ -276,7 +276,7 @@ func _water_try_source_conversion(
 
 
 func _water_has_upstream_supply(
-	position: Vector3i
+	position: Vector3i,
 	current_level: int
 ) -> bool:
 	var above := _water_get(
