@@ -17,31 +17,25 @@ extends CharacterBody3D
 @export var air_acceleration: float = 7.0
 
 @export_category("Water")
-@export var water_walk_speed: float = 1.8
-@export var water_swim_speed: float = 5.6
 
-@export var water_acceleration: float = 3.5
-@export var water_swim_acceleration: float = 8.0
+# These are the Java Edition water-travel constants, expressed
+# in Minecraft's 20-tick-per-second model.
+@export var water_acceleration_per_tick: float = 0.02
+@export var water_gravity_per_tick: float = 0.08
+@export var water_jump_impulse_per_tick: float = 0.04
+@export var water_sneak_impulse_per_tick: float = 0.04
 
-@export var water_drag: float = 0.8
+@export var water_normal_drag: float = 0.8
 @export var water_swim_drag: float = 0.9
 @export var water_vertical_drag: float = 0.8
 
-# Minecraft gravity is 0.08 blocks/tick².
-# Converted to Godot's seconds-based physics units:
-# 0.08 × 20 × 20 = 32 blocks/second².
-@export var water_gravity: float = 32.0
+# Java Edition only lets a player use a normal ground jump
+# when the fluid depth is at or below this threshold.
+@export var water_fluid_jump_threshold: float = 0.4
 
-# Approximate terminal downward speed produced by
-# Minecraft-style fluid falling + water drag.
-@export var water_sink_speed: float = 3.2
-
-# Additional downward control while crouching.
-@export var water_crouch_sink_speed: float = 6.4
-
-@export var water_swim_up_speed: float = 3.0
-@export var water_exit_jump_velocity: float = 6.0
-@export var water_swim_down_speed: float = 2.5
+# Java Edition's fluid collision escape sets Y velocity to
+# 0.3 blocks/tick when a horizontal collision has enough room above.
+@export var water_edge_jump_velocity_per_tick: float = 0.3
 
 const WATER: int = 5
 
@@ -429,24 +423,25 @@ func is_head_in_water() -> bool:
 	)
 
 
-func can_water_exit_jump() -> bool:
-	if not is_head_in_water():
+func _is_shallow_water_for_ground_jump() -> bool:
+	if not is_in_water() or is_head_in_water():
 		return false
 
+	var block_y := floorf(global_position.y)
+	var fluid_depth := 1.0 - (global_position.y - block_y)
+
+	return fluid_depth <= water_fluid_jump_threshold
+
+
+func _can_water_edge_jump() -> bool:
 	if not is_on_wall():
 		return false
 
-	# Minecraft's water escape behavior checks whether
-	# there is enough free space above the player.
-	var motion := Vector3(
-		0.0,
-		0.75,
-		0.0
-	)
-
+	# Match Java's fluid collision escape check: there must be
+	# enough free space for the upward escape motion.
 	return not test_move(
 		global_transform,
-		motion
+		Vector3(0.0, 0.6, 0.0)
 	)
 
 
@@ -479,18 +474,6 @@ func get_swim_direction(
 		direction = direction.normalized()
 
 	return direction
-
-
-func _is_grounded_for_jump() -> bool:
-	if is_on_floor():
-		return true
-
-	# Give jumping a tiny tolerance when Jolt reports the floor
-	# one frame late while the player is resting on a voxel.
-	return test_move(
-		global_transform,
-		Vector3(0.0, -0.08, 0.0)
-	)
 
 
 func _physics_process(delta: float) -> void:
@@ -616,155 +599,106 @@ func _physics_process(delta: float) -> void:
 	# WATER MOVEMENT
 	# ---------------------------------------------------------------
 
-	var grounded_for_jump: bool = _is_grounded_for_jump()
+	# Godot's velocity is in blocks/second while Minecraft stores
+	# entity velocity in blocks/tick. This fractional-tick update
+	# preserves Minecraft's 20 TPS recurrence at arbitrary FPS.
+	var tick_scale: float = delta * 20.0
+	var grounded_for_jump: bool = is_on_floor()
 
-	# If the player is grounded and their head is above the water,
-	# use normal ground physics. This prevents a water block touching
-	# the feet from disabling the normal Space jump.
+	var shallow_water_ground_jump: bool = (
+		grounded_for_jump
+		and _is_shallow_water_for_ground_jump()
+	)
+
 	var use_water_physics: bool = (
 		in_water
-		and not (
-			grounded_for_jump
-			and not head_in_water
-		)
+		and not shallow_water_ground_jump
 	)
 
 	if use_water_physics:
 
-		if swimming:
+		var water_drag: float = (
+			water_swim_drag
+			if swimming
+			else water_normal_drag
+		)
 
-			# -------------------------------------------------------
-			# FULL SWIMMING
-			# -------------------------------------------------------
+		var vertical_drag: float = water_vertical_drag
 
-			var target_velocity: Vector3 = (
-				direction *
-				water_swim_speed
+		# Java's updateVelocity adds 0.02 blocks/tick of movement
+		# acceleration before fluid drag.
+		var water_input := direction * (
+			water_acceleration_per_tick * 20.0
+		)
+
+		# Jumping and sneaking in water are +/-0.04 blocks/tick
+		# impulses, applied before the same vertical drag.
+		var water_vertical_input: float = 0.0
+
+		if Input.is_action_pressed("jump"):
+			water_vertical_input += (
+				water_jump_impulse_per_tick * 20.0
+			)
+		elif is_crouching:
+			water_vertical_input -= (
+				water_sneak_impulse_per_tick * 20.0
 			)
 
-			if direction != Vector3.ZERO:
+		var horizontal_drag_factor: float = pow(
+			water_drag,
+			tick_scale
+		)
 
-				velocity.x = move_toward(
-					velocity.x,
-					target_velocity.x,
-					water_swim_acceleration * delta
-				)
+		var vertical_drag_factor: float = pow(
+			vertical_drag,
+			tick_scale
+		)
 
-				velocity.z = move_toward(
-					velocity.z,
-					target_velocity.z,
-					water_swim_acceleration * delta
-				)
+		var horizontal_input_per_tick: Vector3 = (
+			direction *
+			water_acceleration_per_tick *
+			20.0 *
+			water_drag
+		)
 
-			# Space = swim upward.
-			var target_vertical_velocity: float = (
-				direction.y *
-				water_swim_speed
+		var horizontal_recurrence_factor: float = (
+			(1.0 - horizontal_drag_factor) /
+			(1.0 - water_drag)
+		)
+
+		velocity.x = (
+			velocity.x * horizontal_drag_factor
+			+ horizontal_input_per_tick.x *
+			horizontal_recurrence_factor
+		)
+
+		velocity.z = (
+			velocity.z * horizontal_drag_factor
+			+ horizontal_input_per_tick.z *
+			horizontal_recurrence_factor
+		)
+
+		var vertical_input_per_tick: float = (
+			water_vertical_input * vertical_drag
+		)
+
+		# Non-sprinting water travel applies gravity/16 after drag.
+		# Sprint-swimming deliberately skips this adjustment.
+		if not swimming:
+			vertical_input_per_tick -= (
+				water_gravity_per_tick * 20.0 / 16.0
 			)
 
-			if Input.is_action_pressed("jump"):
+		var vertical_recurrence_factor: float = (
+			(1.0 - vertical_drag_factor) /
+			(1.0 - vertical_drag)
+		)
 
-				target_vertical_velocity = (
-					water_swim_up_speed
-				)
-
-			elif is_crouching:
-
-				target_vertical_velocity = (
-					-water_crouch_sink_speed
-				)
-
-			elif absf(target_vertical_velocity) < 0.01:
-
-				target_vertical_velocity = (
-					-water_sink_speed
-				)
-
-			velocity.y = move_toward(
-				velocity.y,
-				target_vertical_velocity,
-				water_swim_acceleration * delta
-			)
-
-			var swim_horizontal_drag: float = pow(
-				water_swim_drag,
-				delta * 20.0
-			)
-
-			var swim_vertical_drag: float = pow(
-				water_vertical_drag,
-				delta * 20.0
-			)
-
-			velocity.x *= swim_horizontal_drag
-			velocity.z *= swim_horizontal_drag
-			velocity.y *= swim_vertical_drag
-
-		else:
-
-			# -------------------------------------------------------
-			# TREADING / WADING WATER
-			# -------------------------------------------------------
-
-			var target_velocity := (
-				direction *
-				water_walk_speed
-			)
-
-			if direction != Vector3.ZERO:
-
-				velocity.x = move_toward(
-					velocity.x,
-					target_velocity.x,
-					water_acceleration * delta
-				)
-
-				velocity.z = move_toward(
-					velocity.z,
-					target_velocity.z,
-					water_acceleration * delta
-				)
-
-			else:
-
-				var horizontal_drag: float = pow(
-					water_drag,
-					delta * 20.0
-				)
-
-				velocity.x *= horizontal_drag
-				velocity.z *= horizontal_drag
-
-			# Water gravity / fluid drag.
-			velocity.y -= water_gravity * 0.5 * delta
-
-			var vertical_drag: float = pow(
-				water_vertical_drag,
-				delta * 20.0
-			)
-
-			velocity.y *= vertical_drag
-
-			velocity.y = maxf(
-				velocity.y,
-				-water_sink_speed
-			)
-
-			# Crouch = sink faster.
-			if is_crouching:
-				velocity.y = move_toward(
-					velocity.y,
-					-water_crouch_sink_speed,
-					water_gravity * delta
-				)
-
-			# Space = rise.
-			if Input.is_action_pressed("jump"):
-				velocity.y = move_toward(
-					velocity.y,
-					water_swim_up_speed,
-					water_swim_acceleration * delta
-				)
+		velocity.y = (
+			velocity.y * vertical_drag_factor
+			+ vertical_input_per_tick *
+			vertical_recurrence_factor
+		)
 
 	else:
 
@@ -852,13 +786,17 @@ func _physics_process(delta: float) -> void:
 	# Water → shore hop
 	# ---------------------------------------------------------------
 
+	# Java's fluid travel can produce a 0.3-block/tick upward escape
+	# when the player hits a wall and the upward path is clear.
 	if (
 		in_water
-		and head_in_water
+		and swimming
 		and Input.is_action_pressed("jump")
-		and can_water_exit_jump()
+		and _can_water_edge_jump()
 	):
-		velocity.y = water_exit_jump_velocity
+		velocity.y = (
+			water_edge_jump_velocity_per_tick * 20.0
+		)
 
 	# Re-check the pose after movement so leaving the water
 	# immediately transitions to standing or crawling.
