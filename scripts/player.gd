@@ -282,11 +282,7 @@ func _update_swim_crawl_state(
 
 		# Keep swim mode latched while W is held. Physical sprint
 		# input no longer matters once swimming has started.
-		if (
-			in_water
-			and moving_forward
-			and not is_on_floor()
-		):
+		if in_water and moving_forward:
 			_set_swim_crawl_pose()
 			return
 
