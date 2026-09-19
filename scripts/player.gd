@@ -846,6 +846,11 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
+	# Re-check the water state after movement so the player
+	# can transition out of the swimming/crawling pose immediately.
+	var post_move_in_water: bool = is_in_water()
+	var post_move_head_in_water: bool = is_head_in_water()
+
 	# Re-check the pose after movement so leaving the water
 	# immediately transitions to standing or crawling.
 	if (
