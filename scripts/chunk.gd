@@ -887,13 +887,7 @@ func _add_water_block_faces(
 				normal,
 				water_height
 			)
-		elif _water_height(neighbor_id) + 0.001 < water_height:
-			_add_face(
-				surface_tool,
-				position,
-				normal,
-				water_height
-			)
+
 
 func _add_face(
 	surface_tool: SurfaceTool,
