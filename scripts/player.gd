@@ -447,6 +447,7 @@ func _physics_process(delta: float) -> void:
 				water_swim_speed
 			)
 
+			# Horizontal swimming.
 			if direction != Vector3.ZERO:
 
 				velocity.x = move_toward(
@@ -455,27 +456,51 @@ func _physics_process(delta: float) -> void:
 					water_swim_acceleration * delta
 				)
 
-				var target_sink_speed: float = water_sink_speed
-
-				if is_crouching:
-					target_sink_speed = water_fast_sink_speed
-
-				velocity.y = move_toward(
-					velocity.y,
-					-target_sink_speed,
-					water_gravity * delta
-				)
-
 				velocity.z = move_toward(
 					velocity.z,
 					target_velocity.z,
 					water_swim_acceleration * delta
 				)
 
+			# -------------------------------------------------------
+			# Vertical swimming
+			# -------------------------------------------------------
 
-			# Minecraft applies approximately 0.9 horizontal
-			# slowdown while sprint-swimming and approximately
-			# 0.8 vertical drag.
+			var target_vertical_velocity: float = (
+				direction.y * water_swim_speed
+			)
+
+			# Holding Jump makes the player swim upward.
+			if Input.is_action_pressed("jump"):
+
+				target_vertical_velocity = (
+					water_swim_up_speed
+				)
+
+			# Holding Crouch makes the player swim downward faster.
+			elif is_crouching:
+
+				target_vertical_velocity = (
+					-water_fast_sink_speed
+				)
+
+			# No vertical input: gently sink.
+			elif absf(target_vertical_velocity) < 0.01:
+
+				target_vertical_velocity = (
+					-water_sink_speed
+				)
+
+			velocity.y = move_toward(
+				velocity.y,
+				target_vertical_velocity,
+				water_swim_acceleration * delta
+			)
+
+			# -------------------------------------------------------
+			# Water drag
+			# -------------------------------------------------------
+
 			var swim_horizontal_drag: float = pow(
 				water_swim_drag,
 				delta * 20.0
