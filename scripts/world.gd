@@ -310,9 +310,11 @@ var distance_travelled: float = 0.0
 var play_time_seconds: float = 0.0
 var last_player_position := Vector3.ZERO
 var statistics_initialized: bool = false
+var has_saved_player_position: bool = false
 
 
 func _ready() -> void:
+	render_distance = GameSettings.render_distance
 	world_name = GameSession.world_name
 	if world_name == "":
 		world_name = "World"
@@ -351,6 +353,7 @@ func _ready() -> void:
 	if world_metadata.has("player_x") and float(
 		world_metadata.get("player_y", -1.0)
 	) >= 0.0:
+		has_saved_player_position = true
 		player.global_position = Vector3(
 			float(world_metadata.get("player_x", 8.5)),
 			float(world_metadata.get("player_y", -1.0)),
@@ -1682,12 +1685,21 @@ func set_block_world(
 	if local_z < 0 or local_z >= CHUNK_SIZE:
 		return
 
-	var old_block_id: int = chunk.get_block(local_x, local_y, local_z)
+	var old_block_id: int = chunk.get_block(
+		local_x,
+		local_y,
+		local_z
+	)
 
 	if old_block_id == block_id:
 		return
 
-	chunk.set_block(local_x, local_y, local_z, block_id)
+	chunk.set_block(
+		local_x,
+		local_y,
+		local_z,
+		block_id
+	)
 
 	dirty_chunks[chunk_coord] = true
 
@@ -1697,20 +1709,41 @@ func set_block_world(
 		elif old_block_id == AIR and block_id != AIR:
 			blocks_placed += 1
 
-	enqueue_player_edit(chunk_coord)
+	enqueue_player_edit(
+		chunk_coord
+	)
 
-	if schedule_water and old_block_id != block_id:
-		var changed := Vector3i(floori(world_position.x), floori(world_position.y), floori(world_position.z))
+	if schedule_water:
+		var changed := Vector3i(
+			floori(world_position.x),
+			floori(world_position.y),
+			floori(world_position.z)
+		)
+
 		if _is_water(old_block_id) or _is_water(block_id):
 			_water_schedule(changed)
 			_water_schedule_neighbors(changed)
 
-	# Update neighboring chunk if the edited voxel is on an edge.
+	# Update neighboring chunks when an edit is on a chunk boundary.
 	if local_x == 0:
-
 		enqueue_player_edit(
 			chunk_coord + Vector2i(-1, 0)
 		)
+	elif local_x == CHUNK_SIZE - 1:
+		enqueue_player_edit(
+			chunk_coord + Vector2i(1, 0)
+		)
+
+	if local_z == 0:
+		enqueue_player_edit(
+			chunk_coord + Vector2i(0, -1)
+		)
+	elif local_z == CHUNK_SIZE - 1:
+		enqueue_player_edit(
+			chunk_coord + Vector2i(0, 1)
+		)
+
+
 func get_statistics() -> Dictionary:
 	return {
 		"world_name": world_name,
@@ -1731,6 +1764,7 @@ func save_world() -> void:
 			continue
 
 		var chunk = loaded_chunks[chunk_coord]
+
 		if not chunk.is_generated:
 			continue
 
@@ -1743,40 +1777,22 @@ func save_world() -> void:
 	dirty_chunks.clear()
 
 	world_metadata["seed"] = world_seed
-	world_metadata["player_x"] = player.global_position.x
-	world_metadata["player_y"] = player.global_position.y
-	world_metadata["player_z"] = player.global_position.z
-	world_metadata["player_yaw"] = player.rotation.y
-	world_metadata["player_pitch"] = player.camera.rotation.x
 	world_metadata["blocks_broken"] = blocks_broken
 	world_metadata["blocks_placed"] = blocks_placed
 	world_metadata["distance_travelled"] = distance_travelled
 	world_metadata["play_time_seconds"] = play_time_seconds
 
+	if player_spawned:
+		world_metadata["player_x"] = player.global_position.x
+		world_metadata["player_y"] = player.global_position.y
+		world_metadata["player_z"] = player.global_position.z
+		world_metadata["player_yaw"] = player.rotation.y
+		world_metadata["player_pitch"] = player.camera.rotation.x
+
 	WorldStore.save_metadata(
 		world_name,
 		world_metadata
 	)
-
-
-
-	elif local_x == CHUNK_SIZE - 1:
-
-		enqueue_player_edit(
-			chunk_coord + Vector2i(1, 0)
-		)
-
-	if local_z == 0:
-
-		enqueue_player_edit(
-			chunk_coord + Vector2i(0, -1)
-		)
-
-	elif local_z == CHUNK_SIZE - 1:
-
-		enqueue_player_edit(
-			chunk_coord + Vector2i(0, 1)
-		)
 
 
 # ===================================================================
@@ -1840,7 +1856,7 @@ func try_spawn_player() -> void:
 	if player_spawned:
 		return
 
-	var spawn_chunk_coord := Vector2i.ZERO
+	var spawn_chunk_coord := player_chunk
 
 	if not loaded_chunks.has(
 		spawn_chunk_coord
@@ -1861,24 +1877,25 @@ func try_spawn_player() -> void:
 	if not spawn_chunk.collision_ready:
 		return
 
-	var spawn_x: int = 8
-	var spawn_z: int = 8
+	if not has_saved_player_position:
+		var spawn_x: int = 8
+		var spawn_z: int = 8
 
-	var highest_y: int = (
-		spawn_chunk.get_highest_solid_block(
-			spawn_x,
-			spawn_z
+		var highest_y: int = (
+			spawn_chunk.get_highest_solid_block(
+				spawn_x,
+				spawn_z
+			)
 		)
-	)
 
-	if highest_y < 0:
-		return
+		if highest_y < 0:
+			return
 
-	player.global_position = Vector3(
-		spawn_x + 0.5,
-		highest_y + 2.0,
-		spawn_z + 0.5
-	)
+		player.global_position = Vector3(
+			spawn_x + 0.5,
+			highest_y + 2.0,
+			spawn_z + 0.5
+		)
 
 	player.velocity = Vector3.ZERO
 
