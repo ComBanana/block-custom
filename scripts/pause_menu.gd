@@ -105,6 +105,7 @@ func _ready() -> void:
 	pause_menu.visible = false
 	settings_center.visible = false
 	statistics_center.visible = false
+	statistics_center.visible = false
 
 	resume_button.pressed.connect(resume_game)
 	settings_button.pressed.connect(open_settings)
