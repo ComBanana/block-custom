@@ -144,23 +144,50 @@ var active_mesh_priority: int = PRIORITY_FAR
 func _is_water(block_id: int) -> bool:
 	return block_id >= WATER and block_id <= WATER_FALLING
 
+
 func _is_water_source(block_id: int) -> bool:
 	return block_id == WATER
 
-func _water_flow_level(block_id: int) -> int:
-	if block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7:
-		return block_id - WATER_FLOW_1 + 1
-	return 0
+
+func _is_water_falling(block_id: int) -> bool:
+	return block_id == WATER_FALLING
+
 
 func _is_water_flowing(block_id: int) -> bool:
 	return block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7
 
+
+func _water_flow_level(block_id: int) -> int:
+	if block_id == WATER:
+		return 0
+
+	if _is_water_flowing(block_id):
+		return block_id - WATER_FLOW_1 + 1
+
+	if block_id == WATER_FALLING:
+		return 8
+
+	return -1
+
+
+func _water_block_for_level(level: int) -> int:
+	if level <= 0:
+		return WATER
+
+	return WATER_FLOW_1 + mini(
+		level - 1,
+		6
+	)
+
+
 func _water_schedule(position: Vector3i) -> void:
 	if position.y < 0 or position.y >= CHUNK_HEIGHT:
 		return
+
 	if not water_updates_queued.has(position):
 		water_update_queue.append(position)
 		water_updates_queued[position] = true
+
 
 func _water_schedule_neighbors(position: Vector3i) -> void:
 	_water_schedule(position + Vector3i(0, -1, 0))
@@ -170,12 +197,24 @@ func _water_schedule_neighbors(position: Vector3i) -> void:
 	_water_schedule(position + Vector3i(0, 0, -1))
 	_water_schedule(position + Vector3i(0, 0, 1))
 
-func _water_get(position: Vector3i) -> int:
-	return get_block_world(Vector3(position.x + 0.001, position.y + 0.001, position.z + 0.001))
 
-func _water_set(position: Vector3i, block_id: int) -> bool:
+func _water_get(position: Vector3i) -> int:
+	return get_block_world(
+		Vector3(
+			position.x + 0.001,
+			position.y + 0.001,
+			position.z + 0.001
+		)
+	)
+
+
+func _water_set(
+	position: Vector3i,
+	block_id: int
+) -> bool:
 	if _water_get(position) == block_id:
 		return false
+
 	set_block_world(
 		Vector3(
 			position.x + 0.001,
@@ -186,94 +225,282 @@ func _water_set(position: Vector3i, block_id: int) -> bool:
 		false,
 		false
 	)
+
 	return true
 
-func _water_count_source_neighbors(position: Vector3i) -> int:
-	var count := 0
-	for offset in [Vector3i(-1,0,0), Vector3i(1,0,0), Vector3i(0,0,-1), Vector3i(0,0,1)]:
+
+func _water_count_source_neighbors(
+	position: Vector3i
+) -> int:
+	var count: int = 0
+
+	var offsets := [
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for offset in offsets:
 		if _water_get(position + offset) == WATER:
 			count += 1
+
 	return count
 
-func _water_try_source_conversion(position: Vector3i) -> bool:
+
+func _water_try_source_conversion(
+	position: Vector3i
+) -> bool:
 	var current := _water_get(position)
-	if current != AIR and not _is_water_flowing(current):
+
+	if (
+		current != AIR
+		and not _is_water_flowing(current)
+	):
 		return false
+
 	if _water_count_source_neighbors(position) < 2:
 		return false
-	var below := _water_get(position + Vector3i(0,-1,0))
+
+	var below := _water_get(
+		position + Vector3i(0, -1, 0)
+	)
+
 	if below == AIR or _is_water(below):
 		return false
-	return _water_set(position, WATER)
 
-func _water_spread_horizontal(position: Vector3i, current_level: int) -> void:
-	var target_level := current_level + 1
-	if target_level > 7:
-		return
-	var offsets := [Vector3i(-1,0,0), Vector3i(1,0,0), Vector3i(0,0,-1), Vector3i(0,0,1)]
-	var drops: Array[Vector3i] = []
-	var opens: Array[Vector3i] = []
+	return _water_set(
+		position,
+		WATER
+	)
+
+
+func _water_has_upstream_supply(
+	position: Vector3i
+	current_level: int
+) -> bool:
+	var above := _water_get(
+		position + Vector3i(0, 1, 0)
+	)
+
+	if (
+		above == WATER
+		or above == WATER_FALLING
+	):
+		return true
+
+	if _is_water_flowing(above):
+		var above_level := _water_flow_level(above)
+
+		if above_level < current_level:
+			return true
+
+	if current_level <= 0:
+		return true
+
+	var offsets := [
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
 	for offset in offsets:
-		var target: Vector3i = position + offset
+		var neighbor := _water_get(
+			position + offset
+		)
+
+		if neighbor == WATER:
+			return true
+
+		if _is_water_flowing(neighbor):
+			var neighbor_level := _water_flow_level(
+				neighbor
+			)
+
+			if neighbor_level < current_level:
+				return true
+
+	return false
+
+
+func _water_spread_horizontal(
+	position: Vector3i,
+	current_level: int
+) -> void:
+	if current_level >= 7:
+		return
+
+	var next_level: int = current_level + 1
+	var next_block: int = _water_block_for_level(
+		next_level
+	)
+
+	var offsets := [
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for offset in offsets:
+		var target := position + offset
 		var target_id := _water_get(target)
-		if target_id != AIR and not _is_water_flowing(target_id):
-			continue
-		if _water_get(target + Vector3i(0,-1,0)) == AIR:
-			drops.append(target)
-		else:
-			opens.append(target)
-	var targets := drops if not drops.is_empty() else opens
-	for target in targets:
-		var target_id := _water_get(target)
+
 		if target_id == WATER or target_id == WATER_FALLING:
 			continue
-		if _is_water_flowing(target_id) and _water_flow_level(target_id) <= target_level:
-			continue
-		_water_set(target, WATER + target_level)
 
-func _process_water_position(position: Vector3i) -> void:
+		if target_id == AIR:
+			_water_set(target, next_block)
+			_water_schedule(target)
+			_water_schedule_neighbors(target)
+			continue
+
+		if _is_water_flowing(target_id):
+			var target_level := _water_flow_level(
+				target_id
+			)
+
+			if target_level > next_level:
+				_water_set(target, next_block)
+				_water_schedule(target)
+				_water_schedule_neighbors(target)
+
+
+func _process_water_position(
+	position: Vector3i
+) -> void:
 	var current := _water_get(position)
+
+	# Empty cells can become infinite-water sources when two
+	# source blocks surround them and the floor is solid.
+	if (
+		current == AIR
+		and _water_try_source_conversion(position)
+	):
+		current = WATER
+
 	if not _is_water(current):
 		return
-	var below := position + Vector3i(0,-1,0)
-	if _water_get(below) == AIR:
-		_water_set(below, WATER_FALLING)
-		_water_schedule(below)
-		_water_schedule_neighbors(below)
+
+	var below_position := position + Vector3i(
+		0,
+		-1,
+		0
+	)
+
+	var below := _water_get(below_position)
+
+	# Water always takes an available block below before
+	# attempting horizontal spread.
+	if below == AIR:
+		_water_set(
+			below_position,
+			WATER_FALLING
+		)
+		_water_schedule(below_position)
+		_water_schedule_neighbors(below_position)
 		return
-	var level := _water_flow_level(current)
-	if not _is_water_flowing(current):
-		level = 0
-	_water_try_source_conversion(position)
-	current = _water_get(position)
+
+	# Falling water becomes ordinary flowing water once
+	# it has reached a solid surface. It is not promoted to
+	# a permanent source block.
+	if current == WATER_FALLING:
+		if not _water_has_upstream_supply(position, 1):
+			_water_set(position, AIR)
+			_water_schedule_neighbors(position)
+			return
+
+		_water_set(position, WATER_FLOW_1)
+		current = WATER_FLOW_1
+
+	# Flowing water retracts when no source or lower-level
+	# flow can still feed it.
+	if _is_water_flowing(current):
+		var current_level := _water_flow_level(current)
+
+		if not _water_has_upstream_supply(
+			position,
+			current_level
+		):
+			_water_set(position, AIR)
+			_water_schedule_neighbors(position)
+			return
+
+		_water_spread_horizontal(
+			position,
+			current_level
+		)
+
+		_water_schedule_neighbors(position)
+		return
+
+	# Sources remain in place and spread as level 1 flow.
 	if current == WATER:
-		level = 0
-	_water_spread_horizontal(position, level)
-	_water_schedule_neighbors(position)
+		_water_spread_horizontal(
+			position,
+			0
+		)
+		_water_schedule_neighbors(position)
+
 
 func process_water_queue(delta: float) -> void:
 	water_tick_accumulator += delta
+
 	if water_tick_accumulator < water_tick_interval:
 		return
-	water_tick_accumulator = fmod(water_tick_accumulator, water_tick_interval)
-	var processed := 0
-	while processed < water_updates_per_frame and not water_update_queue.is_empty():
-		var position: Vector3i = water_update_queue.pop_front()
-		water_updates_queued.erase(position)
+
+	water_tick_accumulator = fmod(
+		water_tick_accumulator,
+		water_tick_interval
+	)
+
+	var processed: int = 0
+
+	while (
+		processed < water_updates_per_frame
+		and not water_update_queue.is_empty()
+	):
+		var position: Vector3i = (
+			water_update_queue.pop_front()
+		)
+
+		water_updates_queued.erase(
+			position
+		)
+
 		_process_water_position(position)
 		processed += 1
 
-func enqueue_water_updates_for_chunk(chunk_coord: Vector2i) -> void:
+
+func enqueue_water_updates_for_chunk(
+	chunk_coord: Vector2i
+) -> void:
 	if not loaded_chunks.has(chunk_coord):
 		return
+
 	var chunk = loaded_chunks[chunk_coord]
+
 	if not chunk.is_generated:
 		return
+
 	const WATER_LEVEL: int = 10
+
 	for x in range(CHUNK_SIZE):
 		for z in range(CHUNK_SIZE):
-			if chunk.get_block(x, WATER_LEVEL, z) == WATER:
-				_water_schedule(Vector3i(chunk_coord.x * CHUNK_SIZE + x, WATER_LEVEL, chunk_coord.y * CHUNK_SIZE + z))
+			if chunk.get_block(
+				x,
+				WATER_LEVEL,
+				z
+			) == WATER:
+				_water_schedule(
+					Vector3i(
+						chunk_coord.x * CHUNK_SIZE + x,
+						WATER_LEVEL,
+						chunk_coord.y * CHUNK_SIZE + z
+					)
+				)
+
 
 # ===================================================================
 # Collision
@@ -1720,9 +1947,8 @@ func set_block_world(
 			floori(world_position.z)
 		)
 
-		if _is_water(old_block_id) or _is_water(block_id):
-			_water_schedule(changed)
-			_water_schedule_neighbors(changed)
+		_water_schedule(changed)
+		_water_schedule_neighbors(changed)
 
 	# Update neighboring chunks when an edit is on a chunk boundary.
 	if local_x == 0:
