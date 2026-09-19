@@ -176,7 +176,16 @@ func _water_get(position: Vector3i) -> int:
 func _water_set(position: Vector3i, block_id: int) -> bool:
 	if _water_get(position) == block_id:
 		return false
-	set_block_world(Vector3(position.x + 0.001, position.y + 0.001, position.z + 0.001), block_id, false)
+	set_block_world(
+		Vector3(
+			position.x + 0.001,
+			position.y + 0.001,
+			position.z + 0.001
+		),
+		block_id,
+		false,
+		false
+	)
 	return true
 
 func _water_count_source_neighbors(position: Vector3i) -> int:
@@ -295,9 +304,66 @@ var dirty_chunks: Dictionary = {}
 var save_accumulator: float = 0.0
 const SAVE_INTERVAL: float = 15.0
 
+var blocks_broken: int = 0
+var blocks_placed: int = 0
+var distance_travelled: float = 0.0
+var play_time_seconds: float = 0.0
+var last_player_position := Vector3.ZERO
+var statistics_initialized: bool = false
+
 
 func _ready() -> void:
-	terrain_noise.seed = 12345
+	world_name = GameSession.world_name
+	if world_name == "":
+		world_name = "World"
+
+	world_metadata = WorldStore.load_metadata(world_name)
+
+	if GameSession.load_existing and not world_metadata.is_empty():
+		world_seed = int(
+			world_metadata.get("seed", 12345)
+		)
+	else:
+		world_seed = GameSession.world_seed
+		if world_seed == 0:
+			world_seed = int(
+				world_metadata.get("seed", 12345)
+			)
+		if world_metadata.is_empty():
+			world_metadata = WorldStore.create_world(
+				world_name,
+				world_seed
+			)
+
+	blocks_broken = int(
+		world_metadata.get("blocks_broken", 0)
+	)
+	blocks_placed = int(
+		world_metadata.get("blocks_placed", 0)
+	)
+	distance_travelled = float(
+		world_metadata.get("distance_travelled", 0.0)
+	)
+	play_time_seconds = float(
+		world_metadata.get("play_time_seconds", 0.0)
+	)
+
+	if world_metadata.has("player_x") and float(
+		world_metadata.get("player_y", -1.0)
+	) >= 0.0:
+		player.global_position = Vector3(
+			float(world_metadata.get("player_x", 8.5)),
+			float(world_metadata.get("player_y", -1.0)),
+			float(world_metadata.get("player_z", 8.5))
+		)
+		player.rotation.y = float(
+			world_metadata.get("player_yaw", 0.0)
+		)
+		player.camera.rotation.x = float(
+			world_metadata.get("player_pitch", 0.0)
+		)
+
+	terrain_noise.seed = world_seed
 	terrain_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	terrain_noise.frequency = 0.0075
 	terrain_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -305,7 +371,7 @@ func _ready() -> void:
 	terrain_noise.fractal_gain = 0.45
 
 
-	hill_noise.seed = 23456
+	hill_noise.seed = world_seed + 11111
 	hill_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	hill_noise.frequency = 0.018
 	hill_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -313,7 +379,7 @@ func _ready() -> void:
 	hill_noise.fractal_gain = 0.45
 
 
-	mountain_region_noise.seed = 34567
+	mountain_region_noise.seed = world_seed + 22222
 	mountain_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	mountain_region_noise.frequency = 0.0035
 	mountain_region_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -321,7 +387,7 @@ func _ready() -> void:
 	mountain_region_noise.fractal_gain = 0.5
 
 
-	mountain_shape_noise.seed = 45678
+	mountain_shape_noise.seed = world_seed + 33333
 	mountain_shape_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	mountain_shape_noise.frequency = 0.009
 	mountain_shape_noise.fractal_type = FastNoiseLite.FRACTAL_RIDGED
@@ -342,6 +408,21 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if player_spawned:
+		if statistics_initialized:
+			distance_travelled += (
+				player.global_position.distance_to(last_player_position)
+			)
+		else:
+			statistics_initialized = true
+
+		last_player_position = player.global_position
+		play_time_seconds += delta
+		save_accumulator += delta
+
+		if save_accumulator >= SAVE_INTERVAL:
+			save_accumulator = 0.0
+			save_world()
+
 		var current_chunk := world_to_chunk(
 			player.global_position
 		)
@@ -612,7 +693,18 @@ func load_chunk(
 
 	add_child(chunk)
 
-	# The current chunk.gd still uses the original generate_terrain().
+	var expected_size: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
+	var saved_blocks: PackedByteArray = WorldStore.load_chunk(
+		world_name,
+		chunk_coord
+	)
+
+	if saved_blocks.size() == expected_size:
+		chunk.apply_generated_data(saved_blocks)
+		enqueue_mesh_chunk(chunk_coord)
+		enqueue_neighbor_meshes(chunk_coord)
+		return
+
 	if is_chunk_critical(chunk_coord):
 
 		critical_generation_queue.append(
@@ -632,13 +724,15 @@ func load_chunk(
 
 func _generate_chunk_worker(
 	result: GenerationResult,
-	chunk_coordinate: Vector2i
+	chunk_coordinate: Vector2i,
+	seed: int
 ) -> void:
 
 	result.chunk_coordinate = chunk_coordinate
 	result.blocks = (
 		TERRAIN_GENERATOR.generate_chunk_data(
-			chunk_coordinate
+			chunk_coordinate,
+			seed
 		)
 	)
 
@@ -795,7 +889,8 @@ func process_generation_queue() -> void:
 				"_generate_chunk_worker"
 			).bind(
 				result,
-				chunk_coord
+				chunk_coord,
+				world_seed
 			)
 		)
 
@@ -1099,25 +1194,76 @@ func enqueue_player_edit(
 # Mesh processing
 # ===================================================================
 
+func _build_mesh_worker(
+	result: MeshResult
+) -> void:
+	result.buffer = ChunkMesher.build(
+		result.snapshot
+	)
+
+
 func process_mesh_queue() -> void:
 
-	var start_usec: int = Time.get_ticks_usec()
-	var processed_chunks: int = 0
+	# ---------------------------------------------------------------
+	# COLLECT COMPLETED WORKER MESH TASKS
+	# ---------------------------------------------------------------
 
-	while (
-		processed_chunks < max_mesh_chunks_per_frame
-	):
+	var completed_tasks: Array[int] = []
 
-		var elapsed_ms: float = (
-			float(
-				Time.get_ticks_usec() -
-				start_usec
-			) / 1000.0
+	for task_id in mesh_tasks:
+		if WorkerThreadPool.is_task_completed(task_id):
+			completed_tasks.append(task_id)
+
+	for task_id in completed_tasks:
+		var result: MeshResult = mesh_tasks[task_id]
+
+		var wait_error: Error = (
+			WorkerThreadPool.wait_for_task_completion(
+				task_id
+			)
 		)
 
-		if elapsed_ms >= mesh_budget_ms:
-			return
+		mesh_tasks.erase(task_id)
 
+		if wait_error != OK:
+			push_error(
+				"Chunk mesh task failed: "
+				+ str(wait_error)
+			)
+			continue
+
+		if not loaded_chunks.has(result.chunk_coordinate):
+			continue
+
+		var chunk = loaded_chunks[result.chunk_coordinate]
+
+		if not chunk.is_generated:
+			continue
+
+		# A newer edit or neighbor change may have invalidated
+		# this worker result while it was running.
+		if chunk.mesh_job_id != result.job_id:
+			continue
+
+		if result.buffer == null:
+			push_error(
+				"Chunk mesh task returned no mesh buffer."
+			)
+			continue
+
+		chunk.apply_mesh_buffer(result.buffer)
+		enqueue_collision_chunk(
+			result.chunk_coordinate
+		)
+
+	# ---------------------------------------------------------------
+	# SUBMIT NEW WORK
+	# ---------------------------------------------------------------
+
+	if max_mesh_tasks <= 0:
+		return
+
+	while mesh_tasks.size() < max_mesh_tasks:
 		var chunk_coord: Vector2i = (
 			get_next_mesh_candidate()
 		)
@@ -1125,79 +1271,49 @@ func process_mesh_queue() -> void:
 		if chunk_coord == INVALID_CHUNK:
 			return
 
-		if not loaded_chunks.has(
-			chunk_coord
-		):
+		if not loaded_chunks.has(chunk_coord):
 			continue
 
-		var chunk = loaded_chunks[
-			chunk_coord
-		]
+		var chunk = loaded_chunks[chunk_coord]
 
 		if not chunk.is_generated:
 			continue
 
-		var remaining_ms: float = (
-			mesh_budget_ms - elapsed_ms
-		)
-
-		if not chunk.mesh_building:
-			chunk.begin_mesh_build()
-
-		chunk.process_mesh_step(
-			mesh_columns_per_frame,
-			remaining_ms
-		)
-
+		# A duplicate queue entry cannot start two worker jobs.
 		if chunk.mesh_building:
+			continue
 
-			# The chunk did not finish this frame.
-			# Put it back into the appropriate priority queue.
+		chunk.mesh_building = true
+		chunk.mesh_ready = false
+		chunk.collision_ready = false
+		chunk.mesh_job_id += 1
 
-			if player_edit_queued.has(chunk_coord):
+		var result := MeshResult.new()
+		result.chunk_coordinate = chunk_coord
+		result.job_id = chunk.mesh_job_id
+		result.snapshot = chunk.capture_mesh_snapshot()
 
-				player_edit_queue.push_back(
-					chunk_coord
-				)
-
-				player_edit_queued[chunk_coord] = true
-
-			elif is_chunk_critical(chunk_coord):
-
-				critical_mesh_queue.push_back(
-					chunk_coord
-				)
-
-				critical_mesh_queued[chunk_coord] = true
-
-			elif get_chunk_stream_priority(chunk_coord) == PRIORITY_NEAR:
-
-				near_mesh_queue.push_back(
-					chunk_coord
-				)
-
-				near_mesh_queued[chunk_coord] = true
-
-			else:
-
-				far_mesh_queue.push_back(
-					chunk_coord
-				)
-
-				far_mesh_queued[chunk_coord] = true
-
-		else:
-
-			enqueue_collision_chunk(
-				chunk_coord
+		var mesh_callable: Callable = (
+			Callable(
+				self,
+				"_build_mesh_worker"
+			).bind(
+				result
 			)
+		)
 
-		processed_chunks += 1
+		var task_id: int = WorkerThreadPool.add_task(
+			mesh_callable,
+			is_chunk_critical(chunk_coord),
+			"Mesh chunk (%d, %d)" % [
+				chunk_coord.x,
+				chunk_coord.y
+			]
+		)
 
+		result.job_id = chunk.mesh_job_id
+		mesh_tasks[task_id] = result
 
-# ===================================================================
-# Choose next mesh job
-# ===================================================================
 
 func get_next_mesh_candidate() -> Vector2i:
 
@@ -1436,6 +1552,14 @@ func unload_chunk(
 		chunk_coord
 	]
 
+	if dirty_chunks.has(chunk_coord) and chunk.is_generated:
+		WorldStore.save_chunk(
+			world_name,
+			chunk_coord,
+			chunk.blocks
+		)
+		dirty_chunks.erase(chunk_coord)
+
 	loaded_chunks.erase(
 		chunk_coord
 	)
@@ -1515,7 +1639,8 @@ func get_block_world(
 func set_block_world(
 	world_position: Vector3,
 	block_id: int,
-	schedule_water: bool = true
+	schedule_water: bool = true,
+	record_statistics: bool = true
 ) -> void:
 
 	var chunk_coord := world_to_chunk(
@@ -1559,7 +1684,18 @@ func set_block_world(
 
 	var old_block_id: int = chunk.get_block(local_x, local_y, local_z)
 
+	if old_block_id == block_id:
+		return
+
 	chunk.set_block(local_x, local_y, local_z, block_id)
+
+	dirty_chunks[chunk_coord] = true
+
+	if record_statistics:
+		if old_block_id != AIR and block_id == AIR:
+			blocks_broken += 1
+		elif old_block_id == AIR and block_id != AIR:
+			blocks_placed += 1
 
 	enqueue_player_edit(chunk_coord)
 
@@ -1575,6 +1711,54 @@ func set_block_world(
 		enqueue_player_edit(
 			chunk_coord + Vector2i(-1, 0)
 		)
+func get_statistics() -> Dictionary:
+	return {
+		"world_name": world_name,
+		"seed": world_seed,
+		"play_time_seconds": play_time_seconds,
+		"distance_travelled": distance_travelled,
+		"blocks_broken": blocks_broken,
+		"blocks_placed": blocks_placed
+	}
+
+
+func save_world() -> void:
+	if world_name == "":
+		return
+
+	for chunk_coord in dirty_chunks:
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+		if not chunk.is_generated:
+			continue
+
+		WorldStore.save_chunk(
+			world_name,
+			chunk_coord,
+			chunk.blocks
+		)
+
+	dirty_chunks.clear()
+
+	world_metadata["seed"] = world_seed
+	world_metadata["player_x"] = player.global_position.x
+	world_metadata["player_y"] = player.global_position.y
+	world_metadata["player_z"] = player.global_position.z
+	world_metadata["player_yaw"] = player.rotation.y
+	world_metadata["player_pitch"] = player.camera.rotation.x
+	world_metadata["blocks_broken"] = blocks_broken
+	world_metadata["blocks_placed"] = blocks_placed
+	world_metadata["distance_travelled"] = distance_travelled
+	world_metadata["play_time_seconds"] = play_time_seconds
+
+	WorldStore.save_metadata(
+		world_name,
+		world_metadata
+	)
+
+
 
 	elif local_x == CHUNK_SIZE - 1:
 
@@ -1702,6 +1886,8 @@ func try_spawn_player() -> void:
 
 	player.set_physics_process(true)
 
+	last_player_position = player.global_position
+	statistics_initialized = true
 	player.enable_controls()
 
 	loading_screen.finish()
@@ -1709,8 +1895,9 @@ func try_spawn_player() -> void:
 
 func _exit_tree() -> void:
 
-	for task_id in generation_tasks:
+	save_world()
 
+	for task_id in generation_tasks:
 		var wait_error: Error = (
 			WorkerThreadPool.wait_for_task_completion(
 				task_id
@@ -1724,3 +1911,18 @@ func _exit_tree() -> void:
 			)
 
 	generation_tasks.clear()
+
+	for task_id in mesh_tasks:
+		var wait_error: Error = (
+			WorkerThreadPool.wait_for_task_completion(
+				task_id
+			)
+		)
+
+		if wait_error != OK:
+			push_warning(
+				"Chunk mesh task shutdown error: "
+				+ str(wait_error)
+			)
+
+	mesh_tasks.clear()
