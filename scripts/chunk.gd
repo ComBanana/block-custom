@@ -490,9 +490,6 @@ func apply_generated_data(
 	collision_ready = false
 
 
-func capture_mesh_snapshot() -> PackedByteArray:
-	return ChunkMesher.capture_snapshot(self, get_parent())
-
 
 func cancel_mesh_build() -> void:
 	mesh_building = false
