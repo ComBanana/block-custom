@@ -282,7 +282,11 @@ func _update_swim_crawl_state(
 
 		# Keep swim mode latched while W is held. Physical sprint
 		# input no longer matters once swimming has started.
-		if in_water and moving_forward:
+		if (
+			in_water
+			and moving_forward
+			and not is_on_floor()
+		):
 			_set_swim_crawl_pose()
 			return
 
@@ -636,7 +640,11 @@ func _physics_process(delta: float) -> void:
 			else water_normal_drag
 		)
 
-		var vertical_drag: float = water_vertical_drag
+		var vertical_drag: float = (
+			water_swim_drag
+			if swimming
+			else water_vertical_drag
+		)
 
 		# Java's updateVelocity adds 0.02 blocks/tick of movement
 		# acceleration before fluid drag.
@@ -661,6 +669,7 @@ func _physics_process(delta: float) -> void:
 			water_vertical_input += (
 				direction.y *
 				water_acceleration_per_tick *
+				water_swim_drag *
 				20.0
 			)
 
@@ -806,19 +815,24 @@ func _physics_process(delta: float) -> void:
 	# Water → shore hop
 	# ---------------------------------------------------------------
 
-	# Re-check the water state after movement. The shore hop is
-	# deliberately tested here so it can only happen on an actual
-	# water -> land transition, never merely from touching a wall
-	# while still underwater.
+	# Re-check the water state after movement. A player can still
+	# have their feet in water while their normal standing head
+	# position has already reached the shore.
 	var post_move_in_water: bool = is_in_water()
 	var post_move_head_in_water: bool = is_head_in_water()
+	var post_move_standing_head_in_water: bool = _is_water_block(
+		world.get_block_world(
+			global_position +
+			Vector3(0.0, STANDING_CAMERA_HEIGHT, 0.0)
+		)
+	)
 
 	if (
 		in_water
 		and head_in_water
 		and moving_forward
 		and Input.is_action_pressed("jump")
-		and not post_move_in_water
+		and not post_move_standing_head_in_water
 		and _can_water_edge_jump()
 	):
 		velocity.y = (
