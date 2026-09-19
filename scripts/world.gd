@@ -196,7 +196,7 @@ func _water_spread_horizontal(position: Vector3i, current_level: int) -> void:
 	var drops: Array[Vector3i] = []
 	var opens: Array[Vector3i] = []
 	for offset in offsets:
-		var target := position + offset
+		var target: Vector3i = position + offset
 		var target_id := _water_get(target)
 		if target_id != AIR and not _is_water_flowing(target_id):
 			continue
@@ -324,7 +324,7 @@ func _ready() -> void:
 	update_chunks()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if player_spawned:
 		var current_chunk := world_to_chunk(
 			player.global_position
