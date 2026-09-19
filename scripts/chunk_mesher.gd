@@ -4,6 +4,9 @@ class_name ChunkMesher
 const CHUNK_SIZE: int = 16
 const CHUNK_HEIGHT: int = 64
 const PADDED_SIZE: int = CHUNK_SIZE + 2
+const PADDED_HEIGHT: int = CHUNK_HEIGHT + 2
+const CHUNK_VOLUME: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
+const PADDED_VOLUME: int = PADDED_SIZE * PADDED_HEIGHT * PADDED_SIZE
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -15,77 +18,126 @@ const WATER_FLOW_1: int = 6
 const WATER_FLOW_7: int = 12
 const WATER_FALLING: int = 13
 
+const FACE_UP: int = 0
+const FACE_DOWN: int = 1
+const FACE_FORWARD: int = 2
+const FACE_BACK: int = 3
+const FACE_LEFT: int = 4
+const FACE_RIGHT: int = 5
+
+
+class MeshSurface:
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var normals: PackedVector3Array = PackedVector3Array()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+
+	func add_quad(
+		v0: Vector3,
+		v1: Vector3,
+		v2: Vector3,
+		v3: Vector3,
+		normal: Vector3
+	) -> void:
+		var base_index: int = vertices.size()
+
+		vertices.append(v0)
+		vertices.append(v1)
+		vertices.append(v2)
+		vertices.append(v3)
+
+		normals.append(normal)
+		normals.append(normal)
+		normals.append(normal)
+		normals.append(normal)
+
+		uvs.append(Vector2(0.0, 0.0))
+		uvs.append(Vector2(1.0, 0.0))
+		uvs.append(Vector2(1.0, 1.0))
+		uvs.append(Vector2(0.0, 1.0))
+
+		indices.append(base_index)
+		indices.append(base_index + 1)
+		indices.append(base_index + 2)
+		indices.append(base_index)
+		indices.append(base_index + 2)
+		indices.append(base_index + 3)
+
+	func add_collision_quad(
+		v0: Vector3,
+		v1: Vector3,
+		v2: Vector3,
+		v3: Vector3
+	) -> void:
+		collision_vertices.append(v0)
+		collision_vertices.append(v1)
+		collision_vertices.append(v2)
+		collision_vertices.append(v0)
+		collision_vertices.append(v2)
+		collision_vertices.append(v3)
+
 
 class MeshBuffer:
-	var grass_verts: Array[Vector3] = []
-	var grass_normals: Array[Vector3] = []
-	var grass_uvs: Array[Vector2] = []
-	var dirt_verts: Array[Vector3] = []
-	var dirt_normals: Array[Vector3] = []
-	var dirt_uvs: Array[Vector2] = []
-	var stone_verts: Array[Vector3] = []
-	var stone_normals: Array[Vector3] = []
-	var stone_uvs: Array[Vector2] = []
-	var sand_verts: Array[Vector3] = []
-	var sand_normals: Array[Vector3] = []
-	var sand_uvs: Array[Vector2] = []
-	var water_verts: Array[Vector3] = []
-	var water_normals: Array[Vector3] = []
-	var water_uvs: Array[Vector2] = []
-	var collision_faces: Array[Vector3] = []
+	var grass: MeshSurface = MeshSurface.new()
+	var dirt: MeshSurface = MeshSurface.new()
+	var stone: MeshSurface = MeshSurface.new()
+	var sand: MeshSurface = MeshSurface.new()
+	var water: MeshSurface = MeshSurface.new()
+	var collision_faces: PackedVector3Array = PackedVector3Array()
 
-	func add_quad(layer: int, corners: Array[Vector3], normal: Vector3) -> void:
-		var verts: Array[Vector3]
-		var normals: Array[Vector3]
-		var uvs: Array[Vector2]
+	func surface_for_layer(layer: int) -> MeshSurface:
 		match layer:
 			0:
-				verts = grass_verts
-				normals = grass_normals
-				uvs = grass_uvs
+				return grass
 			1:
-				verts = dirt_verts
-				normals = dirt_normals
-				uvs = dirt_uvs
+				return dirt
 			2:
-				verts = stone_verts
-				normals = stone_normals
-				uvs = stone_uvs
+				return stone
 			3:
-				verts = sand_verts
-				normals = sand_normals
-				uvs = sand_uvs
+				return sand
 			_:
-				verts = water_verts
-				normals = water_normals
-				uvs = water_uvs
+				return water
 
-		verts.append(corners[0])
-		verts.append(corners[1])
-		verts.append(corners[2])
-		verts.append(corners[0])
-		verts.append(corners[2])
-		verts.append(corners[3])
-		for _i in range(6):
-			normals.append(normal)
-		uvs.append(Vector2(0, 0))
-		uvs.append(Vector2(1, 0))
-		uvs.append(Vector2(1, 1))
-		uvs.append(Vector2(0, 0))
-		uvs.append(Vector2(1, 1))
-		uvs.append(Vector2(0, 1))
+	func add_quad(
+		layer: int,
+		v0: Vector3,
+		v1: Vector3,
+		v2: Vector3,
+		v3: Vector3,
+		normal: Vector3
+	) -> void:
+		surface_for_layer(layer).add_quad(
+			v0,
+			v1,
+			v2,
+			v3,
+			normal
+		)
 
-	func add_collision_quad(corners: Array[Vector3]) -> void:
-		collision_faces.append(corners[0])
-		collision_faces.append(corners[1])
-		collision_faces.append(corners[2])
-		collision_faces.append(corners[0])
-		collision_faces.append(corners[2])
-		collision_faces.append(corners[3])
+	func add_collision_quad(
+		v0: Vector3,
+		v1: Vector3,
+		v2: Vector3,
+		v3: Vector3
+	) -> void:
+		collision_faces.append(v0)
+		collision_faces.append(v1)
+		collision_faces.append(v2)
+		collision_faces.append(v0)
+		collision_faces.append(v2)
+		collision_faces.append(v3)
+
+
+static func chunk_index(x: int, y: int, z: int) -> int:
+	return x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE
 
 
 static func padded_index(x: int, y: int, z: int) -> int:
-	return (x + 1) + (z + 1) * PADDED_SIZE + y * PADDED_SIZE * PADDED_SIZE
+	return (
+		(x + 1)
+		+ (z + 1) * PADDED_SIZE
+		+ (y + 1) * PADDED_SIZE * PADDED_SIZE
+	)
 
 
 static func is_water(block_id: int) -> bool:
@@ -95,28 +147,151 @@ static func is_water(block_id: int) -> bool:
 static func water_height(block_id: int) -> float:
 	if block_id == WATER or block_id == WATER_FALLING:
 		return 15.0 / 16.0
+
 	if block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7:
 		var level: int = block_id - WATER_FLOW_1 + 1
-		return maxf(1.0 / 16.0, (8.0 - float(level)) / 8.0)
+		return maxf(
+			1.0 / 16.0,
+			(8.0 - float(level)) / 8.0
+		)
+
 	return 0.0
 
 
-static func capture_snapshot(chunk, world) -> PackedByteArray:
+static func build_from_blocks(
+	center_blocks: PackedByteArray,
+	neg_x_blocks: PackedByteArray,
+	pos_x_blocks: PackedByteArray,
+	neg_z_blocks: PackedByteArray,
+	pos_z_blocks: PackedByteArray
+) -> MeshBuffer:
 	var snapshot := PackedByteArray()
-	snapshot.resize(PADDED_SIZE * CHUNK_HEIGHT * PADDED_SIZE)
+	snapshot.resize(PADDED_VOLUME)
 	snapshot.fill(AIR)
 
-	for y in range(CHUNK_HEIGHT):
-		for z in range(-1, CHUNK_SIZE + 1):
-			for x in range(-1, CHUNK_SIZE + 1):
-				var block_id: int = AIR
-				if x >= 0 and x < CHUNK_SIZE and z >= 0 and z < CHUNK_SIZE:
-					block_id = chunk.get_block(x, y, z)
-				elif world != null:
-					block_id = chunk.get_block_for_mesh(x, y, z)
-				snapshot[padded_index(x, y, z)] = block_id
+	_copy_center_blocks(
+		snapshot,
+		center_blocks
+	)
 
-	return snapshot
+	_copy_x_border(
+		snapshot,
+		neg_x_blocks,
+		-1,
+		CHUNK_SIZE - 1
+	)
+
+	_copy_x_border(
+		snapshot,
+		pos_x_blocks,
+		CHUNK_SIZE,
+		0
+	)
+
+	_copy_z_border(
+		snapshot,
+		neg_z_blocks,
+		-1,
+		CHUNK_SIZE - 1
+	)
+
+	_copy_z_border(
+		snapshot,
+		pos_z_blocks,
+		CHUNK_SIZE,
+		0
+	)
+
+	return build(snapshot)
+
+
+static func _copy_center_blocks(
+	snapshot: PackedByteArray,
+	center_blocks: PackedByteArray
+) -> void:
+	if center_blocks.size() != CHUNK_VOLUME:
+		return
+
+	for y in range(CHUNK_HEIGHT):
+		var source_y_base: int = (
+			y * CHUNK_SIZE * CHUNK_SIZE
+		)
+		var target_y_base: int = (
+			(y + 1) * PADDED_SIZE * PADDED_SIZE
+		)
+
+		for z in range(CHUNK_SIZE):
+			var source_base: int = (
+				source_y_base + z * CHUNK_SIZE
+			)
+			var target_base: int = (
+				target_y_base + (z + 1) * PADDED_SIZE + 1
+			)
+
+			for x in range(CHUNK_SIZE):
+				snapshot[target_base + x] = (
+					center_blocks[source_base + x]
+				)
+
+
+static func _copy_x_border(
+	snapshot: PackedByteArray,
+	neighbor_blocks: PackedByteArray,
+	target_x: int,
+	source_x: int
+) -> void:
+	if neighbor_blocks.size() != CHUNK_VOLUME:
+		return
+
+	for y in range(CHUNK_HEIGHT):
+		var source_y_base: int = (
+			y * CHUNK_SIZE * CHUNK_SIZE
+		)
+
+		for z in range(CHUNK_SIZE):
+			var source_index: int = (
+				source_y_base
+				+ z * CHUNK_SIZE
+				+ source_x
+			)
+
+			snapshot[
+				padded_index(
+					target_x,
+					y,
+					z
+				)
+			] = neighbor_blocks[source_index]
+
+
+static func _copy_z_border(
+	snapshot: PackedByteArray,
+	neighbor_blocks: PackedByteArray,
+	target_z: int,
+	source_z: int
+) -> void:
+	if neighbor_blocks.size() != CHUNK_VOLUME:
+		return
+
+	for y in range(CHUNK_HEIGHT):
+		var source_y_base: int = (
+			y * CHUNK_SIZE * CHUNK_SIZE
+		)
+
+		for x in range(CHUNK_SIZE):
+			var source_index: int = (
+				source_y_base
+				+ source_z * CHUNK_SIZE
+				+ x
+			)
+
+			snapshot[
+				padded_index(
+					x,
+					y,
+					target_z
+				)
+			] = neighbor_blocks[source_index]
 
 
 static func build(snapshot: PackedByteArray) -> MeshBuffer:
@@ -125,15 +300,53 @@ static func build(snapshot: PackedByteArray) -> MeshBuffer:
 	for x in range(CHUNK_SIZE):
 		for z in range(CHUNK_SIZE):
 			for y in range(CHUNK_HEIGHT):
-				var block_id: int = snapshot[padded_index(x, y, z)]
+				var block_id: int = (
+					snapshot[
+						padded_index(
+							x,
+							y,
+							z
+						)
+					]
+				)
+
 				if block_id == AIR:
 					continue
+
 				if is_water(block_id):
-					_add_water_faces(snapshot, x, y, z, block_id, buffer)
+					_add_water_faces(
+						snapshot,
+						x,
+						y,
+						z,
+						block_id,
+						buffer
+					)
 				else:
-					_add_solid_faces(snapshot, x, y, z, block_id, buffer)
+					_add_solid_faces(
+						snapshot,
+						x,
+						y,
+						z,
+						block_id,
+						buffer
+					)
 
 	return buffer
+
+
+static func _layer_for_block(block_id: int) -> int:
+	match block_id:
+		GRASS:
+			return 0
+		DIRT:
+			return 1
+		STONE:
+			return 2
+		SAND:
+			return 3
+		_:
+			return 4
 
 
 static func _add_solid_faces(
@@ -145,20 +358,91 @@ static func _add_solid_faces(
 	buffer: MeshBuffer
 ) -> void:
 	var origin := Vector3(x, y, z)
-	var checks := [
-		[Vector3i(0, 1, 0), Vector3.UP],
-		[Vector3i(0, -1, 0), Vector3.DOWN],
-		[Vector3i(0, 0, -1), Vector3.FORWARD],
-		[Vector3i(0, 0, 1), Vector3.BACK],
-		[Vector3i(-1, 0, 0), Vector3.LEFT],
-		[Vector3i(1, 0, 0), Vector3.RIGHT]
+	var layer: int = _layer_for_block(block_id)
+
+	var neighbor: int = snapshot[
+		padded_index(x, y + 1, z)
 	]
-	for check in checks:
-		var offset: Vector3i = check[0]
-		var neighbor: int = snapshot[padded_index(x + offset.x, y + offset.y, z + offset.z)]
-		if neighbor != AIR and not is_water(neighbor):
-			continue
-		_add_face(buffer, block_id, origin, check[1], 1.0, true)
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_UP,
+			Vector3.UP,
+			1.0,
+			true
+		)
+
+	neighbor = snapshot[
+		padded_index(x, y - 1, z)
+	]
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_DOWN,
+			Vector3.DOWN,
+			1.0,
+			true
+		)
+
+	neighbor = snapshot[
+		padded_index(x, y, z - 1)
+	]
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_FORWARD,
+			Vector3.FORWARD,
+			1.0,
+			true
+		)
+
+	neighbor = snapshot[
+		padded_index(x, y, z + 1)
+	]
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_BACK,
+			Vector3.BACK,
+			1.0,
+			true
+		)
+
+	neighbor = snapshot[
+		padded_index(x - 1, y, z)
+	]
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_LEFT,
+			Vector3.LEFT,
+			1.0,
+			true
+		)
+
+	neighbor = snapshot[
+		padded_index(x + 1, y, z)
+	]
+	if neighbor == AIR or is_water(neighbor):
+		_add_face(
+			buffer,
+			layer,
+			origin,
+			FACE_RIGHT,
+			Vector3.RIGHT,
+			1.0,
+			true
+		)
 
 
 static func _add_water_faces(
@@ -172,87 +456,161 @@ static func _add_water_faces(
 	var origin := Vector3(x, y, z)
 	var height: float = water_height(block_id)
 
-	var above: int = AIR
-	if y + 1 < CHUNK_HEIGHT:
-		above = snapshot[padded_index(x, y + 1, z)]
-	if above == AIR:
-		_add_face(buffer, WATER, origin, Vector3.UP, height, false)
-
-	var below: int = AIR
-	if y > 0:
-		below = snapshot[padded_index(x, y - 1, z)]
-	if below == AIR:
-		_add_face(buffer, WATER, origin, Vector3.DOWN, 1.0, false)
-
-	var sides := [
-		[Vector3i(0, 0, -1), Vector3.FORWARD],
-		[Vector3i(0, 0, 1), Vector3.BACK],
-		[Vector3i(-1, 0, 0), Vector3.LEFT],
-		[Vector3i(1, 0, 0), Vector3.RIGHT]
+	var above: int = snapshot[
+		padded_index(x, y + 1, z)
 	]
-	for side in sides:
-		var offset: Vector3i = side[0]
-		var neighbor: int = snapshot[padded_index(x + offset.x, y + offset.y, z + offset.z)]
-		if neighbor == AIR:
-			_add_face(buffer, WATER, origin, side[1], height, false)
+
+	if above == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_UP,
+			Vector3.UP,
+			height,
+			false
+		)
+
+	var below: int = snapshot[
+		padded_index(x, y - 1, z)
+	]
+
+	if below == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_DOWN,
+			Vector3.DOWN,
+			1.0,
+			false
+		)
+
+	var neighbor: int = snapshot[
+		padded_index(x, y, z - 1)
+	]
+
+	if neighbor == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_FORWARD,
+			Vector3.FORWARD,
+			height,
+			false
+		)
+
+	neighbor = snapshot[
+		padded_index(x, y, z + 1)
+	]
+
+	if neighbor == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_BACK,
+			Vector3.BACK,
+			height,
+			false
+		)
+
+	neighbor = snapshot[
+		padded_index(x - 1, y, z)
+	]
+
+	if neighbor == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_LEFT,
+			Vector3.LEFT,
+			height,
+			false
+		)
+
+	neighbor = snapshot[
+		padded_index(x + 1, y, z)
+	]
+
+	if neighbor == AIR:
+		_add_face(
+			buffer,
+			4,
+			origin,
+			FACE_RIGHT,
+			Vector3.RIGHT,
+			height,
+			false
+		)
 
 
 static func _add_face(
 	buffer: MeshBuffer,
-	block_id: int,
+	layer: int,
 	position: Vector3,
+	face: int,
 	normal: Vector3,
 	height: float,
 	include_collision: bool
 ) -> void:
-	var corners: Array[Vector3] = _face_corners(position, normal, height)
-	var layer: int = 4
-	match block_id:
-		GRASS:
-			layer = 0
-		DIRT:
-			layer = 1
-		STONE:
-			layer = 2
-		SAND:
-			layer = 3
+	var v0: Vector3
+	var v1: Vector3
+	var v2: Vector3
+	var v3: Vector3
+
+	match face:
+		FACE_UP:
+			v0 = position + Vector3(0, height, 0)
+			v1 = position + Vector3(1, height, 0)
+			v2 = position + Vector3(1, height, 1)
+			v3 = position + Vector3(0, height, 1)
+
+		FACE_DOWN:
+			v0 = position + Vector3(0, 0, 0)
+			v1 = position + Vector3(0, 0, 1)
+			v2 = position + Vector3(1, 0, 1)
+			v3 = position + Vector3(1, 0, 0)
+
+		FACE_FORWARD:
+			v0 = position + Vector3(0, 0, 0)
+			v1 = position + Vector3(1, 0, 0)
+			v2 = position + Vector3(1, height, 0)
+			v3 = position + Vector3(0, height, 0)
+
+		FACE_BACK:
+			v0 = position + Vector3(0, 0, 1)
+			v1 = position + Vector3(0, height, 1)
+			v2 = position + Vector3(1, height, 1)
+			v3 = position + Vector3(1, 0, 1)
+
+		FACE_LEFT:
+			v0 = position + Vector3(0, 0, 0)
+			v1 = position + Vector3(0, height, 0)
+			v2 = position + Vector3(0, height, 1)
+			v3 = position + Vector3(0, 0, 1)
+
 		_:
-			layer = 4
-	buffer.add_quad(layer, corners, normal)
+			v0 = position + Vector3(1, 0, 0)
+			v1 = position + Vector3(1, 0, 1)
+			v2 = position + Vector3(1, height, 1)
+			v3 = position + Vector3(1, height, 0)
+
+	buffer.add_quad(
+		layer,
+		v0,
+		v1,
+		v2,
+		v3,
+		normal
+	)
+
 	if include_collision:
-		buffer.add_collision_quad(corners)
-
-
-static func _face_corners(position: Vector3, normal: Vector3, height: float) -> Array[Vector3]:
-	var corners: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
-	if normal == Vector3.UP:
-		corners[0] = position + Vector3(0, height, 0)
-		corners[1] = position + Vector3(1, height, 0)
-		corners[2] = position + Vector3(1, height, 1)
-		corners[3] = position + Vector3(0, height, 1)
-	elif normal == Vector3.DOWN:
-		corners[0] = position + Vector3(0, 0, 0)
-		corners[1] = position + Vector3(0, 0, 1)
-		corners[2] = position + Vector3(1, 0, 1)
-		corners[3] = position + Vector3(1, 0, 0)
-	elif normal == Vector3.FORWARD:
-		corners[0] = position + Vector3(0, 0, 0)
-		corners[1] = position + Vector3(1, 0, 0)
-		corners[2] = position + Vector3(1, height, 0)
-		corners[3] = position + Vector3(0, height, 0)
-	elif normal == Vector3.BACK:
-		corners[0] = position + Vector3(0, 0, 1)
-		corners[1] = position + Vector3(0, height, 1)
-		corners[2] = position + Vector3(1, height, 1)
-		corners[3] = position + Vector3(1, 0, 1)
-	elif normal == Vector3.LEFT:
-		corners[0] = position + Vector3(0, 0, 0)
-		corners[1] = position + Vector3(0, height, 0)
-		corners[2] = position + Vector3(0, height, 1)
-		corners[3] = position + Vector3(0, 0, 1)
-	else:
-		corners[0] = position + Vector3(1, 0, 0)
-		corners[1] = position + Vector3(1, 0, 1)
-		corners[2] = position + Vector3(1, height, 1)
-		corners[3] = position + Vector3(1, height, 0)
-	return corners
+		buffer.add_collision_quad(
+			v0,
+			v1,
+			v2,
+			v3
+		)
