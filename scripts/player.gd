@@ -773,13 +773,12 @@ func _physics_process(delta: float) -> void:
 
 		# Jump from water onto a one-block shore when the
 		# player is pressing forward + jump at the shoreline.
-		# Only trigger while not already rising so holding Space
-		# does not continuously re-boost the player.
+		# Holding Space at a one-block shore keeps the player
+		# climbing until the collision is cleared.
 		if (
 			swimming
 			and moving_forward
 			and Input.is_action_pressed("jump")
-			and velocity.y <= 0.5
 			and _can_water_shore_jump(direction)
 		):
 			velocity.y = (
