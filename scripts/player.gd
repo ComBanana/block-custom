@@ -35,7 +35,7 @@ extends CharacterBody3D
 
 # Java Edition's fluid collision escape sets Y velocity to
 # 0.3 blocks/tick when a horizontal collision has enough room above.
-@export var water_edge_jump_velocity_per_tick: float = 0.3
+@export var water_edge_jump_velocity_per_tick: float = 0.45
 
 const AIR: int = 0
 const WATER: int = 5
@@ -63,6 +63,7 @@ const BLOCK_RAY_LENGTH := 4.5
 @export_category("Sprint FOV")
 @export var sprint_fov_multiplier: float = 1.10
 @export var fov_change_speed: float = 8.0
+@export var camera_transition_speed: float = 12.0
 
 var normal_fov: float
 var controls_enabled: bool = false
@@ -73,16 +74,21 @@ var place_requested: bool = false
 
 
 const STANDING_HEIGHT: float = 1.8
+const CROUCH_HEIGHT: float = 1.5
 const SWIM_CRAWL_HEIGHT: float = 0.6
 
-const STANDING_CAMERA_HEIGHT: float = 1.6
+const STANDING_CAMERA_HEIGHT: float = 1.62
+const CROUCH_CAMERA_HEIGHT: float = 1.27
 const SWIM_CRAWL_CAMERA_HEIGHT: float = 0.4
 
 var standing_shape: BoxShape3D
+var crouch_shape: BoxShape3D
 var swim_crawl_shape: BoxShape3D
 
 var swimming_mode: bool = false
 var crawling_mode: bool = false
+var target_camera_height: float = STANDING_CAMERA_HEIGHT
+var current_pose: String = "standing"
 
 
 func get_block_target() -> Dictionary:
@@ -199,44 +205,52 @@ func block_overlaps_player(
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	normal_fov = camera.fov
+	normal_fov = GameSettings.fov
+	camera.fov = normal_fov
+	floor_snap_length = 0.1
 
-	# Keep the original standing collision shape as our
-	# reusable standing shape.
-	standing_shape = (
-		collision_shape.shape as BoxShape3D
-	).duplicate()
+	standing_shape = (collision_shape.shape as BoxShape3D).duplicate()
 
-	# Low hitbox used for swimming and crawling.
+	crouch_shape = BoxShape3D.new()
+	crouch_shape.size = Vector3(0.7, CROUCH_HEIGHT, 0.7)
+
 	swim_crawl_shape = BoxShape3D.new()
-	swim_crawl_shape.size = Vector3(
-		0.7,
-		SWIM_CRAWL_HEIGHT,
-		0.7
-	)
+	swim_crawl_shape.size = Vector3(0.7, SWIM_CRAWL_HEIGHT, 0.7)
 
-	# Make sure the starting pose is standing.
-	_set_standing_pose()
+	_apply_pose("standing", true)
+
+
+func _apply_pose(pose: String, instant_camera: bool = false) -> void:
+	current_pose = pose
+
+	match pose:
+		"swim", "crawl":
+			collision_shape.shape = swim_crawl_shape
+			collision_shape.position.y = SWIM_CRAWL_HEIGHT * 0.5
+			target_camera_height = SWIM_CRAWL_CAMERA_HEIGHT
+		"crouch":
+			collision_shape.shape = crouch_shape
+			collision_shape.position.y = CROUCH_HEIGHT * 0.5
+			target_camera_height = CROUCH_CAMERA_HEIGHT
+		_:
+			collision_shape.shape = standing_shape
+			collision_shape.position.y = STANDING_HEIGHT * 0.5
+			target_camera_height = STANDING_CAMERA_HEIGHT
+
+	if instant_camera:
+		camera.position.y = target_camera_height
 
 
 func _set_standing_pose() -> void:
-	collision_shape.shape = standing_shape
+	_apply_pose("standing")
 
-	collision_shape.position.y = (
-		STANDING_HEIGHT * 0.5
-	)
 
-	camera.position.y = STANDING_CAMERA_HEIGHT
+func _set_crouch_pose() -> void:
+	_apply_pose("crouch")
 
 
 func _set_swim_crawl_pose() -> void:
-	collision_shape.shape = swim_crawl_shape
-
-	collision_shape.position.y = (
-		SWIM_CRAWL_HEIGHT * 0.5
-	)
-
-	camera.position.y = SWIM_CRAWL_CAMERA_HEIGHT
+	_apply_pose("swim" if swimming_mode else "crawl")
 
 
 func _can_stand_up() -> bool:
@@ -270,84 +284,57 @@ func _update_swim_crawl_state(
 	head_in_water: bool,
 	sprinting: bool
 ) -> void:
-
-	# ---------------------------------------------------------------
-	# Currently swimming
-	# ---------------------------------------------------------------
+	var moving_forward: bool = Input.is_action_pressed("move_forward")
+	var want_crouch: bool = Input.is_action_pressed("crouch") and not in_water
 
 	if swimming_mode:
-
-		var moving_forward: bool = Input.is_action_pressed(
-			"move_forward"
-		)
-
-		# Keep swim mode latched while W is held. Physical sprint
-		# input no longer matters once swimming has started.
 		if in_water and moving_forward:
 			_set_swim_crawl_pose()
 			return
 
-		# Leaving the water OR releasing W ends swim mode.
 		swimming_mode = false
-
-		# Preserve the low posture if the surrounding blocks prevent
-		# the player from standing normally.
 		if _can_stand_up():
-			crawling_mode = false
-			_set_standing_pose()
+			crawling_mode = want_crouch
+			if want_crouch:
+				_set_crouch_pose()
+			else:
+				_set_standing_pose()
 		else:
 			crawling_mode = true
 			_set_swim_crawl_pose()
-
 		return
 
-
-	# ---------------------------------------------------------------
-	# Currently crawling
-	# ---------------------------------------------------------------
-
 	if crawling_mode:
-
-		# Entering water while crawling can put the player
-		# back into swimming.
-		if (
-			in_water
-			and head_in_water
-			and sprinting
-		):
+		if in_water and head_in_water and sprinting:
 			crawling_mode = false
 			swimming_mode = true
 			_set_swim_crawl_pose()
 			return
 
-		# Automatically stand when the obstruction is gone.
-		if _can_stand_up():
+		if _can_stand_up() and not want_crouch:
 			crawling_mode = false
 			_set_standing_pose()
+		elif want_crouch and _can_stand_up():
+			crawling_mode = false
+			_set_crouch_pose()
 		else:
+			crawling_mode = true
 			_set_swim_crawl_pose()
-
 		return
 
-
-	# ---------------------------------------------------------------
-	# Enter swimming
-	# ---------------------------------------------------------------
-
-	if (
-		in_water
-		and head_in_water
-		and sprinting
-		and Input.is_action_pressed("move_forward")
-	):
+	if in_water and head_in_water and sprinting and moving_forward:
 		swimming_mode = true
 		_set_swim_crawl_pose()
 		return
 
+	if want_crouch:
+		_set_crouch_pose()
+		return
 
-	# ---------------------------------------------------------------
-	# Normal standing
-	# ---------------------------------------------------------------
+	if not _can_stand_up():
+		crawling_mode = true
+		_set_swim_crawl_pose()
+		return
 
 	_set_standing_pose()
 
@@ -412,120 +399,97 @@ func _is_water_block(block_id: int) -> bool:
 	return block_id >= WATER and block_id <= WATER_FALLING
 
 
+func _is_solid_block(block_id: int) -> bool:
+	return block_id != AIR and not _is_water_block(block_id)
+
+
 func is_in_water() -> bool:
-	var sample_positions := [
-		global_position + Vector3(0.0, 0.15, 0.0),
-		global_position + Vector3(0.0, 0.9, 0.0)
+	var height: float = collision_shape.shape.size.y if collision_shape.shape is BoxShape3D else STANDING_HEIGHT
+	var sample_heights := [
+		0.05,
+		height * 0.25,
+		height * 0.5,
+		minf(height * 0.75, height - 0.05)
 	]
-
-	for sample_position in sample_positions:
-		if _is_water_block(
-			world.get_block_world(sample_position)
-		):
+	for sample_height in sample_heights:
+		if _is_water_block(world.get_block_world(global_position + Vector3(0.0, sample_height, 0.0))):
 			return true
-
 	return false
 
 
 func is_head_in_water() -> bool:
+	return _is_water_block(world.get_block_world(camera.global_position))
+
+
+func _water_below_feet() -> bool:
 	return _is_water_block(
-		world.get_block_world(camera.global_position)
+		world.get_block_world(global_position + Vector3(0.0, -0.08, 0.0))
 	)
+
+
+func _solid_below_feet() -> bool:
+	return _is_solid_block(
+		world.get_block_world(global_position + Vector3(0.0, -0.08, 0.0))
+	)
+
+
+func _submerged_depth() -> float:
+	var depth := 0.0
+	var height: float = collision_shape.shape.size.y if collision_shape.shape is BoxShape3D else STANDING_HEIGHT
+	var step := 0.1
+	var y := 0.05
+	while y < height:
+		if _is_water_block(world.get_block_world(global_position + Vector3(0.0, y, 0.0))):
+			depth += step
+		y += step
+	return depth
 
 
 func _is_shallow_water_for_ground_jump() -> bool:
-	if not is_in_water() or is_head_in_water():
+	if is_head_in_water():
 		return false
-
-	var block_y := floorf(global_position.y)
-	var fluid_depth := 1.0 - (global_position.y - block_y)
-
-	return fluid_depth <= water_fluid_jump_threshold
+	if _submerged_depth() > water_fluid_jump_threshold:
+		return false
+	return is_on_floor() and _solid_below_feet()
 
 
 func _can_water_shore_jump(direction: Vector3) -> bool:
-	var horizontal_direction := Vector3(
-		direction.x,
-		0.0,
-		direction.z
-	)
-
+	var horizontal_direction := Vector3(direction.x, 0.0, direction.z)
 	if horizontal_direction.length_squared() <= 0.0001:
 		return false
-
 	horizontal_direction = horizontal_direction.normalized()
 
-	# Check the actual voxel directly ahead of the player.
-	# A one-block-high shore is a solid block at the player's
-	# current foot level with empty space above it.
-	var sample_position: Vector3 = (
-		global_position +
-		horizontal_direction * 0.45
-	)
-
+	var sample_position: Vector3 = global_position + horizontal_direction * 0.55
 	var shore_x: int = floori(sample_position.x)
-	var shore_y: int = floori(global_position.y)
 	var shore_z: int = floori(sample_position.z)
+	var base_y: int = floori(global_position.y)
 
-	var shore_block: int = world.get_block_world(
-		Vector3(
-			shore_x + 0.001,
-			shore_y + 0.001,
-			shore_z + 0.001
-		)
-	)
+	for y_offset in range(0, 2):
+		var shore_y: int = base_y + y_offset
+		var shore_block: int = world.get_block_world(Vector3(shore_x + 0.001, shore_y + 0.001, shore_z + 0.001))
+		if not _is_solid_block(shore_block):
+			continue
 
-	if shore_block == AIR or _is_water_block(shore_block):
-		return false
+		var block_above: int = world.get_block_world(Vector3(shore_x + 0.001, shore_y + 1.001, shore_z + 0.001))
+		if block_above != AIR and not _is_water_block(block_above):
+			continue
 
-	var block_above: int = world.get_block_world(
-		Vector3(
-			shore_x + 0.001,
-			shore_y + 1.001,
-			shore_z + 0.001
-		)
-	)
+		if test_move(global_transform, horizontal_direction * 0.45):
+			return true
 
-	if block_above != AIR:
-		return false
-
-	# Make sure there is actually a horizontal obstruction at
-	# the shore. This prevents the water-jump from firing in open
-	# water just because a distant block happens to be nearby.
-	var forward_motion: Vector3 = (
-		horizontal_direction * 0.45
-	)
-
-	return test_move(
-		global_transform,
-		forward_motion
-	)
+	return false
 
 
 func is_swimming() -> bool:
 	return swimming_mode
 
 
-func get_swim_direction(
-	input_vector: Vector2
-) -> Vector3:
-
-	var camera_forward: Vector3 = (
-		-camera.global_transform.basis.z
-	).normalized()
-
-	var camera_right: Vector3 = (
-		camera.global_transform.basis.x
-	).normalized()
-
-	var direction: Vector3 = (
-		camera_right * input_vector.x
-		- camera_forward * input_vector.y
-	)
-
-	if direction.length_squared() > 1.0:
+func get_swim_direction(input_vector: Vector2) -> Vector3:
+	var camera_forward: Vector3 = (-camera.global_transform.basis.z).normalized()
+	var camera_right: Vector3 = camera.global_transform.basis.x.normalized()
+	var direction: Vector3 = camera_right * input_vector.x - camera_forward * input_vector.y
+	if direction.length_squared() > 0.0001:
 		direction = direction.normalized()
-
 	return direction
 
 
@@ -540,6 +504,13 @@ func _physics_process(delta: float) -> void:
 
 	var in_water: bool = is_in_water()
 	var head_in_water: bool = is_head_in_water()
+	if not in_water and _water_below_feet() and not _solid_below_feet():
+		in_water = true
+
+	if in_water or (_water_below_feet() and not _solid_below_feet()):
+		floor_snap_length = 0.0
+	else:
+		floor_snap_length = 0.1
 
 	is_crouching = Input.is_action_pressed("crouch")
 	var moving_forward: bool = Input.is_action_pressed(
@@ -589,9 +560,12 @@ func _physics_process(delta: float) -> void:
 	camera.fov = lerp(
 		camera.fov,
 		target_fov,
-		1.0 - exp(
-			-fov_change_speed * delta
-		)
+		1.0 - exp(-fov_change_speed * delta)
+	)
+	camera.position.y = lerp(
+		camera.position.y,
+		target_camera_height,
+		1.0 - exp(-camera_transition_speed * delta)
 	)
 
 
@@ -664,127 +638,56 @@ func _physics_process(delta: float) -> void:
 	# entity velocity in blocks/tick. This fractional-tick update
 	# preserves Minecraft's 20 TPS recurrence at arbitrary FPS.
 	var tick_scale: float = delta * 20.0
-	var grounded_for_jump: bool = is_on_floor()
+	var grounded_for_jump: bool = is_on_floor() and _solid_below_feet()
 
 	var shallow_water_ground_jump: bool = (
 		grounded_for_jump
 		and _is_shallow_water_for_ground_jump()
 	)
 
-	var use_water_physics: bool = (
-		in_water
-		and not shallow_water_ground_jump
-	)
+	var use_water_physics: bool = in_water and not shallow_water_ground_jump
 
 	if use_water_physics:
+		var water_drag: float = water_swim_drag if swimming else water_normal_drag
+		var vertical_drag: float = water_swim_drag if swimming else water_vertical_drag
+		var drag_factor: float = pow(water_drag, tick_scale)
+		var vertical_drag_factor: float = pow(vertical_drag, tick_scale)
+		var recurrence_factor: float = (1.0 - drag_factor) / (1.0 - water_drag)
+		var vertical_recurrence_factor: float = (1.0 - vertical_drag_factor) / (1.0 - vertical_drag)
 
-		var water_drag: float = (
-			water_swim_drag
-			if swimming
-			else water_normal_drag
-		)
+		var move_direction := direction
+		if swimming and move_direction.length_squared() > 0.0001:
+			move_direction = move_direction.normalized()
 
-		var vertical_drag: float = (
-			water_swim_drag
-			if swimming
-			else water_vertical_drag
-		)
-
-		# Java's updateVelocity adds 0.02 blocks/tick of movement
-		# acceleration before fluid drag.
-
-		# Jumping and sneaking in water are +/-0.04 blocks/tick
-		# impulses, applied before the same vertical drag.
-		var water_vertical_input: float = 0.0
+		var acceleration: float = water_acceleration_per_tick * 20.0
+		var input_velocity := Vector3.ZERO
+		if swimming:
+			input_velocity = move_direction * acceleration * water_drag
+		else:
+			input_velocity = Vector3(move_direction.x, 0.0, move_direction.z) * acceleration * water_drag
 
 		if is_crouching:
-			# While swimming, Shift is an explicit DOWN control.
-			# It overrides camera pitch and the jump key.
-			water_vertical_input -= (
-				water_sneak_impulse_per_tick * 20.0
-			)
+			input_velocity.y = -water_sneak_impulse_per_tick * 20.0 * vertical_drag
 		elif Input.is_action_pressed("jump"):
-			water_vertical_input += (
-				water_jump_impulse_per_tick * 20.0
-			)
+			input_velocity.y += water_jump_impulse_per_tick * 20.0 * vertical_drag
 		elif swimming:
-			# Swimming follows the camera pitch. This uses the same
-			# 0.02/tick water acceleration as the horizontal movement.
-			water_vertical_input += (
-				direction.y *
-				water_acceleration_per_tick *
-				20.0
-			)
+			input_velocity.y = move_direction.y * acceleration * vertical_drag
 
-		var horizontal_drag_factor: float = pow(
-			water_drag,
-			tick_scale
-		)
-
-		var vertical_drag_factor: float = pow(
-			vertical_drag,
-			tick_scale
-		)
-
-		var horizontal_input_per_tick: Vector3 = (
-			direction *
-			water_acceleration_per_tick *
-			20.0 *
-			water_drag
-		)
-
-		var horizontal_recurrence_factor: float = (
-			(1.0 - horizontal_drag_factor) /
-			(1.0 - water_drag)
-		)
-
-		velocity.x = (
-			velocity.x * horizontal_drag_factor
-			+ horizontal_input_per_tick.x *
-			horizontal_recurrence_factor
-		)
-
-		velocity.z = (
-			velocity.z * horizontal_drag_factor
-			+ horizontal_input_per_tick.z *
-			horizontal_recurrence_factor
-		)
-
-		var vertical_input_per_tick: float = (
-			water_vertical_input * vertical_drag
-		)
-
-		# Non-sprinting water travel applies gravity/16 after drag.
-		# Sprint-swimming deliberately skips this adjustment.
 		if not swimming:
-			vertical_input_per_tick -= (
-				water_gravity_per_tick * 20.0 / 16.0
-			)
+			input_velocity.y -= water_gravity_per_tick * 20.0 / 16.0 * vertical_drag
 
-		var vertical_recurrence_factor: float = (
-			(1.0 - vertical_drag_factor) /
-			(1.0 - vertical_drag)
-		)
+		velocity.x = velocity.x * drag_factor + input_velocity.x * recurrence_factor
+		velocity.z = velocity.z * drag_factor + input_velocity.z * recurrence_factor
+		velocity.y = velocity.y * vertical_drag_factor + input_velocity.y * vertical_recurrence_factor
 
-		velocity.y = (
-			velocity.y * vertical_drag_factor
-			+ vertical_input_per_tick *
-			vertical_recurrence_factor
-		)
-
-		# Jump from water onto a one-block shore when the
-		# player is pressing forward + jump at the shoreline.
-		# Holding Space at a one-block shore keeps the player
-		# climbing until the collision is cleared.
 		if (
-			swimming
-			and moving_forward
+			moving_forward
 			and Input.is_action_pressed("jump")
 			and _can_water_shore_jump(direction)
 		):
-			velocity.y = (
-				water_edge_jump_velocity_per_tick * 20.0
-			)
+			velocity.y = maxf(velocity.y, water_edge_jump_velocity_per_tick * 20.0)
+			if not swimming:
+				velocity.y = maxf(velocity.y, jump_velocity * 0.85)
 
 	else:
 

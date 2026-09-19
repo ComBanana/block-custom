@@ -44,17 +44,14 @@ var mesh_building: bool = false
 var terrain_x: int = 0
 var mesh_x: int = 0
 
-var grass_tool: SurfaceTool
-var dirt_tool: SurfaceTool
-var stone_tool: SurfaceTool
-var sand_tool: SurfaceTool
-var water_tool: SurfaceTool
-
 var grass_material: StandardMaterial3D
 var dirt_material: StandardMaterial3D
 var stone_material: StandardMaterial3D
 var sand_material: StandardMaterial3D
 var water_material: StandardMaterial3D
+
+var mesh_job_id: int = 0
+var collision_faces := PackedVector3Array()
 
 
 func _ready() -> void:
@@ -486,173 +483,52 @@ func apply_generated_data(
 	collision_ready = false
 
 
-func rebuild_mesh_immediate() -> void:
-	if not is_generated:
-		return
-
-	# Throw away any partially generated mesh.
-	if mesh_building:
-		cancel_mesh_build()
-
-	begin_mesh_build()
-
-	# A block edit is a foreground operation.
-	# Build all 16 columns in one pass.
-	process_mesh_step(
-		CHUNK_SIZE,
-		1000000.0
-	)
+func capture_mesh_snapshot() -> PackedByteArray:
+	return ChunkMesher.capture_snapshot(self, get_parent())
 
 
 func cancel_mesh_build() -> void:
 	mesh_building = false
 	mesh_ready = false
-
-	grass_tool = null
-	dirt_tool = null
-	stone_tool = null
-	sand_tool = null
-	water_tool = null
+	mesh_job_id += 1
 
 
-func begin_mesh_build() -> void:
-	if not is_generated:
-		return
-
-	mesh_x = 0
-	mesh_building = true
-	mesh_ready = false
-
-	grass_tool = SurfaceTool.new()
-	dirt_tool = SurfaceTool.new()
-	stone_tool = SurfaceTool.new()
-	sand_tool = SurfaceTool.new()
-	water_tool = SurfaceTool.new()
-
-	grass_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	dirt_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	stone_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	sand_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	water_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-
-	grass_tool.set_material(grass_material)
-	dirt_tool.set_material(dirt_material)
-	stone_tool.set_material(stone_material)
-	sand_tool.set_material(sand_material)
-	water_tool.set_material(water_material)
-
-
-func process_mesh_step(
-	max_columns: int,
-	budget_ms: float
-) -> void:
-	if not mesh_building:
-		begin_mesh_build()
-
-	var start_usec: int = Time.get_ticks_usec()
-	var columns_done: int = 0
-
-	while mesh_x < CHUNK_SIZE:
-		var x := mesh_x
-
-		for y in range(CHUNK_HEIGHT):
-			for z in range(CHUNK_SIZE):
-
-				var block_id := get_block(
-					x,
-					y,
-					z
-				)
-
-				if block_id == AIR:
-					continue
-
-				if _is_water(block_id):
-					_add_water_block_faces(
-						water_tool,
-						x,
-						y,
-						z
-					)
-					continue
-
-				match block_id:
-					GRASS:
-						_add_block_faces(
-							grass_tool,
-							x,
-							y,
-							z
-						)
-
-					DIRT:
-						_add_block_faces(
-							dirt_tool,
-							x,
-							y,
-							z
-						)
-
-					STONE:
-						_add_block_faces(
-							stone_tool,
-							x,
-							y,
-							z
-						)
-
-					SAND:
-						_add_block_faces(
-							sand_tool,
-							x,
-							y,
-							z
-						)
-
-		mesh_x += 1
-		columns_done += 1
-
-		var elapsed_ms := (
-			float(Time.get_ticks_usec() - start_usec)
-			/ 1000.0
-		)
-
-		if columns_done >= max_columns:
-			break
-
-		if elapsed_ms >= budget_ms:
-			break
-
-	# Finished all columns.
-	if mesh_x >= CHUNK_SIZE:
-		finish_mesh_build()
-
-
-func finish_mesh_build() -> void:
-	grass_tool.generate_normals()
-	dirt_tool.generate_normals()
-	stone_tool.generate_normals()
-	sand_tool.generate_normals()
-	water_tool.generate_normals()
-
+func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	var solid_mesh := ArrayMesh.new()
 	var water_mesh := ArrayMesh.new()
 
-	grass_tool.commit(solid_mesh)
-	dirt_tool.commit(solid_mesh)
-	stone_tool.commit(solid_mesh)
-	sand_tool.commit(solid_mesh)
-
-	water_tool.commit(water_mesh)
+	_add_mesh_surface(solid_mesh, grass_material, buffer.grass_verts, buffer.grass_normals, buffer.grass_uvs)
+	_add_mesh_surface(solid_mesh, dirt_material, buffer.dirt_verts, buffer.dirt_normals, buffer.dirt_uvs)
+	_add_mesh_surface(solid_mesh, stone_material, buffer.stone_verts, buffer.stone_normals, buffer.stone_uvs)
+	_add_mesh_surface(solid_mesh, sand_material, buffer.sand_verts, buffer.sand_normals, buffer.sand_uvs)
+	_add_mesh_surface(water_mesh, water_material, buffer.water_verts, buffer.water_normals, buffer.water_uvs)
 
 	$ChunkMesh.mesh = solid_mesh
 	$WaterMesh.mesh = water_mesh
 
+	collision_faces = PackedVector3Array(buffer.collision_faces)
 	mesh_building = false
 	mesh_ready = true
-
-	# Collision is intentionally handled separately.
 	collision_ready = false
+
+
+func _add_mesh_surface(
+	mesh: ArrayMesh,
+	material: Material,
+	verts: Array,
+	normals: Array,
+	uvs: Array
+) -> void:
+	if verts.is_empty():
+		return
+
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array(verts)
+	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array(normals)
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array(uvs)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(mesh.get_surface_count() - 1, material)
 
 
 func clear_collision() -> void:
@@ -667,26 +543,14 @@ func build_collision() -> void:
 	if not is_inside_tree():
 		return
 
-	var mesh: Mesh = $ChunkMesh.mesh
-
-	if mesh == null:
-		$ChunkCollision/CollisionShape.shape = null
-		collision_ready = true
-		return
-
-	if mesh.get_surface_count() == 0:
+	if collision_faces.is_empty():
 		$ChunkCollision/CollisionShape.shape = null
 		collision_ready = true
 		return
 
 	var collision_shape := ConcavePolygonShape3D.new()
-
-	collision_shape.set_faces(
-		mesh.get_faces()
-	)
-
+	collision_shape.set_faces(collision_faces)
 	$ChunkCollision/CollisionShape.shape = collision_shape
-
 	collision_ready = true
 
 
@@ -1006,10 +870,7 @@ func get_highest_solid_block(
 			z
 		)
 
-		if (
-			block_id != AIR
-			and block_id != WATER
-		):
+		if block_id != AIR and not _is_water(block_id):
 			return y
 
 	return -1

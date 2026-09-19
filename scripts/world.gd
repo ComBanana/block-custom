@@ -35,12 +35,13 @@ const PRIORITY_FAR: int = 2
 
 
 @export_category("Streaming")
-@export var chunks_loaded_per_frame: int = 4
-@export var max_generation_tasks: int = 4
-@export var mesh_columns_per_frame: int = 4
-@export var mesh_budget_ms: float = 2.0
-@export var max_mesh_chunks_per_frame: int = 8
-@export var collisions_per_frame: int = 1
+@export var chunks_loaded_per_frame: int = 8
+@export var max_generation_tasks: int = 8
+@export var max_mesh_tasks: int = 6
+@export var mesh_columns_per_frame: int = 16
+@export var mesh_budget_ms: float = 3.0
+@export var max_mesh_chunks_per_frame: int = 12
+@export var collisions_per_frame: int = 3
 @export var critical_chunk_distance: int = 2
 
 
@@ -69,6 +70,13 @@ const TERRAIN_GENERATOR := preload(
 class GenerationResult:
 	var blocks: PackedByteArray
 	var chunk_coordinate: Vector2i
+
+
+class MeshResult:
+	var chunk_coordinate: Vector2i
+	var job_id: int = 0
+	var snapshot: PackedByteArray
+	var buffer: ChunkMesher.MeshBuffer
 
 
 # ===================================================================
@@ -104,6 +112,7 @@ var generation_queue: Array[Vector2i] = []
 var generation_queued: Dictionary = {}
 
 var generation_tasks: Dictionary = {}
+var mesh_tasks: Dictionary = {}
 
 
 # ===================================================================
@@ -278,6 +287,13 @@ var player_chunk := Vector2i.ZERO
 var selected_block: int = GRASS
 
 var player_spawned: bool = false
+
+var world_name: String = "World"
+var world_seed: int = 12345
+var world_metadata: Dictionary = {}
+var dirty_chunks: Dictionary = {}
+var save_accumulator: float = 0.0
+const SAVE_INTERVAL: float = 15.0
 
 
 func _ready() -> void:

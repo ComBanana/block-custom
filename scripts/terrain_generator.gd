@@ -29,13 +29,14 @@ static func _get_index(
 
 static func _get_dirt_depth(
 	world_x: int,
-	world_z: int
+	world_z: int,
+	world_seed: int
 ) -> int:
 
 	var value: int = (
 		world_x * 374761393
 		+ world_z * 668265263
-		+ 12345 * 1442695041
+		+ world_seed * 1442695041
 	)
 
 	value = value ^ (value >> 13)
@@ -49,7 +50,8 @@ static func _get_dirt_depth(
 
 
 static func generate_chunk_data(
-	chunk_coordinate: Vector2i
+	chunk_coordinate: Vector2i,
+	world_seed: int = 12345
 ) -> PackedByteArray:
 
 	var blocks := PackedByteArray()
@@ -70,7 +72,7 @@ static func generate_chunk_data(
 	# ---------------------------------------------------------------
 
 	var terrain_noise := FastNoiseLite.new()
-	terrain_noise.seed = 12345
+	terrain_noise.seed = world_seed
 	terrain_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	terrain_noise.frequency = 0.0075
 	terrain_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -79,7 +81,7 @@ static func generate_chunk_data(
 
 
 	var hill_noise := FastNoiseLite.new()
-	hill_noise.seed = 23456
+	hill_noise.seed = world_seed + 11111
 	hill_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	hill_noise.frequency = 0.018
 	hill_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -88,7 +90,7 @@ static func generate_chunk_data(
 
 
 	var mountain_region_noise := FastNoiseLite.new()
-	mountain_region_noise.seed = 34567
+	mountain_region_noise.seed = world_seed + 22222
 	mountain_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	mountain_region_noise.frequency = 0.0035
 	mountain_region_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -97,7 +99,7 @@ static func generate_chunk_data(
 
 
 	var mountain_shape_noise := FastNoiseLite.new()
-	mountain_shape_noise.seed = 45678
+	mountain_shape_noise.seed = world_seed + 33333
 	mountain_shape_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	mountain_shape_noise.frequency = 0.009
 	mountain_shape_noise.fractal_type = FastNoiseLite.FRACTAL_RIDGED
@@ -221,7 +223,8 @@ static func generate_chunk_data(
 			var dirt_depth: int = (
 				_get_dirt_depth(
 					world_x,
-					world_z
+					world_z,
+					world_seed
 				)
 			)
 
