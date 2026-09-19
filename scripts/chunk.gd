@@ -567,6 +567,15 @@ func process_mesh_step(
 				if block_id == AIR:
 					continue
 
+				if _is_water(block_id):
+					_add_water_block_faces(
+						water_tool,
+						x,
+						y,
+						z
+					)
+					continue
+
 				match block_id:
 					GRASS:
 						_add_block_faces(
@@ -595,14 +604,6 @@ func process_mesh_step(
 					SAND:
 						_add_block_faces(
 							sand_tool,
-							x,
-							y,
-							z
-						)
-
-					WATER:
-						_add_water_block_faces(
-							water_tool,
 							x,
 							y,
 							z
@@ -769,7 +770,7 @@ func _add_block_faces(
 	# Top
 	var neighbor := get_block_for_mesh(x, y + 1, z)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -779,7 +780,7 @@ func _add_block_faces(
 	# Bottom
 	neighbor = get_block_for_mesh(x, y - 1, z)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -789,7 +790,7 @@ func _add_block_faces(
 	# Front
 	neighbor = get_block_for_mesh(x, y, z - 1)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -799,7 +800,7 @@ func _add_block_faces(
 	# Back
 	neighbor = get_block_for_mesh(x, y, z + 1)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -809,7 +810,7 @@ func _add_block_faces(
 	# Left
 	neighbor = get_block_for_mesh(x - 1, y, z)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -819,7 +820,7 @@ func _add_block_faces(
 	# Right
 	neighbor = get_block_for_mesh(x + 1, y, z)
 
-	if neighbor == AIR or neighbor == WATER:
+	if neighbor == AIR or _is_water(neighbor):
 		_add_face(
 			surface_tool,
 			position,
@@ -848,15 +849,25 @@ func _add_water_block_faces(
 ) -> void:
 
 	var position := Vector3(x, y, z)
-	var water_height: float = _water_height(get_block(x, y, z))
-	var above: int = get_block_for_mesh(x, y + 1, z)
+	var block_id := get_block(x, y, z)
+	var water_height: float = _water_height(block_id)
 
+	var above: int = get_block_for_mesh(x, y + 1, z)
 	if not _is_water(above):
-		_add_face(surface_tool, position, Vector3.UP, water_height)
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.UP,
+			water_height
+		)
 
 	var below: int = get_block_for_mesh(x, y - 1, z)
 	if below == AIR:
-		_add_face(surface_tool, position, Vector3.DOWN)
+		_add_face(
+			surface_tool,
+			position,
+			Vector3.DOWN
+		)
 
 	var neighbors := [
 		[Vector3.FORWARD, get_block_for_mesh(x, y, z - 1)],
@@ -868,88 +879,21 @@ func _add_water_block_faces(
 	for side in neighbors:
 		var normal: Vector3 = side[0]
 		var neighbor_id: int = side[1]
+
 		if not _is_water(neighbor_id):
-			_add_face(surface_tool, position, normal, water_height)
+			_add_face(
+				surface_tool,
+				position,
+				normal,
+				water_height
+			)
 		elif _water_height(neighbor_id) + 0.001 < water_height:
-			_add_face(surface_tool, position, normal, water_height)
-
-	var position := Vector3(
-		x,
-		y,
-		z
-	)
-
-	if get_block_for_mesh(
-		x,
-		y + 1,
-		z
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.UP,
-			WATER_HEIGHT
-		)
-
-	if get_block_for_mesh(
-		x,
-		y - 1,
-		z
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.DOWN
-		)
-
-	if get_block_for_mesh(
-		x,
-		y,
-		z - 1
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.FORWARD,
-			WATER_HEIGHT
-		)
-
-	if get_block_for_mesh(
-		x,
-		y,
-		z + 1
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.BACK,
-			WATER_HEIGHT
-		)
-
-	if get_block_for_mesh(
-		x - 1,
-		y,
-		z
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.LEFT,
-			WATER_HEIGHT
-		)
-
-	if get_block_for_mesh(
-		x + 1,
-		y,
-		z
-	) == AIR:
-		_add_face(
-			surface_tool,
-			position,
-			Vector3.RIGHT,
-			WATER_HEIGHT
-		)
-
+			_add_face(
+				surface_tool,
+				position,
+				normal,
+				water_height
+			)
 
 func _add_face(
 	surface_tool: SurfaceTool,
