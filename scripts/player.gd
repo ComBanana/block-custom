@@ -53,9 +53,8 @@ const WATER: int = 5
 const BLOCK_RAY_LENGTH := 4.5
 
 @onready var world = $"../World"
-
-
 @onready var camera: Camera3D = $Camera3D
+@onready var collision_shape: CollisionShape3D = $CollisionShape3D
 
 @export_category("Sprint FOV")
 @export var sprint_fov_multiplier: float = 1.10
@@ -67,6 +66,19 @@ var is_crouching: bool = false
 
 var break_requested: bool = false
 var place_requested: bool = false
+
+
+const STANDING_HEIGHT: float = 1.8
+const SWIM_CRAWL_HEIGHT: float = 0.6
+
+const STANDING_CAMERA_HEIGHT: float = 1.6
+const SWIM_CRAWL_CAMERA_HEIGHT: float = 0.4
+
+var standing_shape: BoxShape3D
+var swim_crawl_shape: BoxShape3D
+
+var swimming_mode: bool = false
+var crawling_mode: bool = false
 
 
 func get_block_target() -> Dictionary:
@@ -184,6 +196,150 @@ func block_overlaps_player(
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	normal_fov = camera.fov
+
+	# Keep the original standing collision shape as our
+	# reusable standing shape.
+	standing_shape = (
+		collision_shape.shape as BoxShape3D
+	).duplicate()
+
+	# Low hitbox used for swimming and crawling.
+	swim_crawl_shape = BoxShape3D.new()
+	swim_crawl_shape.size = Vector3(
+		0.7,
+		SWIM_CRAWL_HEIGHT,
+		0.7
+	)
+
+	# Make sure the starting pose is standing.
+	_set_standing_pose()
+
+
+func _set_standing_pose() -> void:
+	collision_shape.shape = standing_shape
+
+	collision_shape.position.y = (
+		STANDING_HEIGHT * 0.5
+	)
+
+	camera.position.y = STANDING_CAMERA_HEIGHT
+
+
+func _set_swim_crawl_pose() -> void:
+	collision_shape.shape = swim_crawl_shape
+
+	collision_shape.position.y = (
+		SWIM_CRAWL_HEIGHT * 0.5
+	)
+
+	camera.position.y = SWIM_CRAWL_CAMERA_HEIGHT
+
+
+func _can_stand_up() -> bool:
+	var query := PhysicsShapeQueryParameters3D.new()
+
+	query.shape = standing_shape
+
+	query.transform = Transform3D(
+		global_transform.basis,
+		global_position
+		+ Vector3(
+			0.0,
+			STANDING_HEIGHT * 0.5,
+			0.0
+		)
+	)
+
+	query.collision_mask = collision_mask
+	query.exclude = [get_rid()]
+
+	var results := get_world_3d().direct_space_state.intersect_shape(
+		query,
+		1
+	)
+
+	return results.is_empty()
+
+
+func _update_swim_crawl_state(
+	in_water: bool,
+	head_in_water: bool,
+	sprinting: bool
+) -> void:
+
+	# ---------------------------------------------------------------
+	# Currently swimming
+	# ---------------------------------------------------------------
+
+	if swimming_mode:
+
+		# Stay low while still in water.
+		if in_water:
+			_set_swim_crawl_pose()
+			return
+
+		# We have left the water.
+		swimming_mode = false
+
+		# Minecraft keeps the low posture when there isn't
+		# enough room to stand up.
+		if _can_stand_up():
+			crawling_mode = false
+			_set_standing_pose()
+		else:
+			crawling_mode = true
+			_set_swim_crawl_pose()
+
+		return
+
+
+	# ---------------------------------------------------------------
+	# Currently crawling
+	# ---------------------------------------------------------------
+
+	if crawling_mode:
+
+		# Entering water while crawling can put the player
+		# back into swimming.
+		if (
+			in_water
+			and head_in_water
+			and sprinting
+		):
+			crawling_mode = false
+			swimming_mode = true
+			_set_swim_crawl_pose()
+			return
+
+		# Automatically stand when the obstruction is gone.
+		if _can_stand_up():
+			crawling_mode = false
+			_set_standing_pose()
+		else:
+			_set_swim_crawl_pose()
+
+		return
+
+
+	# ---------------------------------------------------------------
+	# Enter swimming
+	# ---------------------------------------------------------------
+
+	if (
+		in_water
+		and head_in_water
+		and sprinting
+	):
+		swimming_mode = true
+		_set_swim_crawl_pose()
+		return
+
+
+	# ---------------------------------------------------------------
+	# Normal standing
+	# ---------------------------------------------------------------
+
+	_set_standing_pose()
 
 
 func enable_controls() -> void:
@@ -333,10 +489,13 @@ func _physics_process(delta: float) -> void:
 		and not is_crouching
 	)
 
-	var swimming: bool = (
-		in_water
-		and sprinting
+	_update_swim_crawl_state(
+		in_water,
+		head_in_water,
+		sprinting
 	)
+
+	var swimming: bool = swimming_mode
 
 	var input_vector := Input.get_vector(
 		"move_left",
@@ -606,7 +765,9 @@ func _physics_process(delta: float) -> void:
 
 		var current_speed := walk_speed
 
-		if sprinting:
+		if crawling_mode:
+			current_speed = crouch_speed
+		elif sprinting:
 			current_speed = sprint_speed
 		elif is_crouching:
 			current_speed = crouch_speed
@@ -676,3 +837,18 @@ func _physics_process(delta: float) -> void:
 		and can_water_exit_jump()
 	):
 		velocity.y = water_exit_jump_velocity
+
+	# Re-check the pose after movement so leaving the water
+	# immediately transitions to standing or crawling.
+	var post_move_in_water: bool = is_in_water()
+	var post_move_head_in_water: bool = is_head_in_water()
+
+	if (
+		post_move_in_water != in_water
+		or post_move_head_in_water != head_in_water
+	):
+		_update_swim_crawl_state(
+			post_move_in_water,
+			post_move_head_in_water,
+			sprinting
+		)
