@@ -446,15 +446,38 @@ func _is_shallow_water_for_ground_jump() -> bool:
 	return fluid_depth <= water_fluid_jump_threshold
 
 
-func _can_water_edge_jump() -> bool:
-	if not is_on_wall():
+func _can_water_shore_jump(direction: Vector3) -> bool:
+	var horizontal_direction := Vector3(
+		direction.x,
+		0.0,
+		direction.z
+	)
+
+	if horizontal_direction.length_squared() <= 0.0001:
 		return false
 
-	# Match Java's fluid collision escape check: there must be
-	# enough free space for the upward escape motion.
-	return not test_move(
+	horizontal_direction = horizontal_direction.normalized()
+
+	# A shore jump is only valid when the low swimming hitbox
+	# is blocked horizontally, but the same hitbox has clear
+	# space after being raised onto the shore.
+	var forward_motion: Vector3 = (
+		horizontal_direction * 0.25
+	)
+
+	if not test_move(
 		global_transform,
-		Vector3(0.0, 0.6, 0.0)
+		forward_motion
+	):
+		return false
+
+	var raised_transform := global_transform.translated(
+		Vector3(0.0, 0.9, 0.0)
+	)
+
+	return not test_move(
+		raised_transform,
+		forward_motion
 	)
 
 
@@ -669,7 +692,6 @@ func _physics_process(delta: float) -> void:
 			water_vertical_input += (
 				direction.y *
 				water_acceleration_per_tick *
-				water_swim_drag *
 				20.0
 			)
 
@@ -728,6 +750,19 @@ func _physics_process(delta: float) -> void:
 			+ vertical_input_per_tick *
 			vertical_recurrence_factor
 		)
+
+		# Jump from water onto a one-block shore when the
+		# swimming hitbox is blocked ahead but clear above.
+		if (
+			swimming
+			and moving_forward
+			and Input.is_action_pressed("jump")
+			and _can_water_shore_jump(direction)
+		):
+			velocity.y = maxf(
+				velocity.y,
+				water_edge_jump_velocity_per_tick * 20.0
+			)
 
 	else:
 
