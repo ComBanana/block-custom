@@ -37,6 +37,7 @@ extends CharacterBody3D
 # 0.3 blocks/tick when a horizontal collision has enough room above.
 @export var water_edge_jump_velocity_per_tick: float = 0.3
 
+const AIR: int = 0
 const WATER: int = 5
 const WATER_FALLING: int = 13
 
