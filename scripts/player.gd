@@ -38,6 +38,7 @@ extends CharacterBody3D
 @export var water_edge_jump_velocity_per_tick: float = 0.3
 
 const WATER: int = 5
+const WATER_FALLING: int = 13
 
 
 # =========================
@@ -382,7 +383,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				world.selected_block = 1
 
 			KEY_2:
-				world.selected_block = 0
+				world.selected_block = WATER
 
 			KEY_3:
 				world.selected_block = 0
@@ -406,6 +407,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				world.selected_block = 0
 
 
+func _is_water_block(block_id: int) -> bool:
+	return block_id >= WATER and block_id <= WATER_FALLING
+
+
 func is_in_water() -> bool:
 	var sample_positions := [
 		global_position + Vector3(0.0, 0.15, 0.0),
@@ -413,19 +418,17 @@ func is_in_water() -> bool:
 	]
 
 	for sample_position in sample_positions:
-		if world.get_block_world(
-			sample_position
-		) == WATER:
+		if _is_water_block(
+			world.get_block_world(sample_position)
+		):
 			return true
 
 	return false
 
 
 func is_head_in_water() -> bool:
-	return (
-		world.get_block_world(
-			camera.global_position
-		) == WATER
+	return _is_water_block(
+		world.get_block_world(camera.global_position)
 	)
 
 
