@@ -33,30 +33,6 @@ transform = Transform3D(0.8660254, 0.38302222, -0.32139382, 0, 0.64278764, 0.766
 
 [node name="Player" parent="." unique_id=282764273 instance=ExtResource("1_elqb8")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 8)
-walk_speed = null
-sprint_speed = null
-jump_velocity = null
-gravity = null
-crouch_speed = null
-ground_acceleration = null
-ground_friction = null
-air_acceleration = null
-water_walk_speed = null
-water_swim_speed = null
-water_acceleration = null
-water_swim_acceleration = null
-water_drag = null
-water_swim_drag = null
-water_vertical_drag = null
-water_gravity = null
-water_sink_speed = null
-water_fast_sink_speed = null
-water_swim_up_speed = null
-water_exit_jump_velocity = null
-water_swim_down_speed = null
-mouse_sensitivity = null
-sprint_fov_multiplier = null
-fov_change_speed = null
 
 [node name="Audio" type="Node" parent="." unique_id=1859972468]
 
@@ -276,8 +252,96 @@ text = "Quit Game"
 [node name="MainMenuButton" type="Button" parent="PauseLayer/PauseMenu/Center/Panel/Buttons" unique_id=966854439]
 custom_minimum_size = Vector2(300, 50)
 layout_mode = 2
-disabled = true
+disabled = false
 text = "Main Menu"
+
+[node name="StatisticsCenter" type="CenterContainer" parent="PauseLayer/PauseMenu"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="StatisticsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/StatisticsCenter"]
+custom_minimum_size = Vector2(450, 360)
+layout_mode = 2
+
+[node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Statistics"
+horizontal_alignment = 1
+
+[node name="WorldRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "World"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow"]
+layout_mode = 2
+text = "World"
+
+[node name="SeedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Seed"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow"]
+layout_mode = 2
+text = "0"
+
+[node name="PlayTimeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Play Time"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow"]
+layout_mode = 2
+text = "0m 0s"
+
+[node name="DistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Distance"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow"]
+layout_mode = 2
+text = "0.0 blocks"
+
+[node name="BlocksBrokenRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Blocks Broken"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow"]
+layout_mode = 2
+text = "0"
+
+[node name="BlocksPlacedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+layout_mode = 2
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Blocks Placed"
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow"]
+layout_mode = 2
+text = "0"
+
+[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+text = "Back"
 
 [node name="SettingsCenter" type="CenterContainer" parent="PauseLayer/PauseMenu" unique_id=1479843354]
 visible = false
