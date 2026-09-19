@@ -454,25 +454,49 @@ func _can_water_shore_jump(direction: Vector3) -> bool:
 
 	horizontal_direction = horizontal_direction.normalized()
 
-	# A shore jump is only valid when the low swimming hitbox
-	# is blocked horizontally, but the same hitbox has clear
-	# space after being raised onto the shore.
-	var forward_motion: Vector3 = (
-		horizontal_direction * 0.25
+	# Check the actual voxel directly ahead of the player.
+	# A one-block-high shore is a solid block at the player's
+	# current foot level with empty space above it.
+	var sample_position: Vector3 = (
+		global_position +
+		horizontal_direction * 0.45
 	)
 
-	if not test_move(
-		global_transform,
-		forward_motion
-	):
+	var shore_x: int = floori(sample_position.x)
+	var shore_y: int = floori(global_position.y)
+	var shore_z: int = floori(sample_position.z)
+
+	var shore_block: int = world.get_block_world(
+		Vector3(
+			shore_x + 0.001,
+			shore_y + 0.001,
+			shore_z + 0.001
+		)
+	)
+
+	if shore_block == AIR or _is_water_block(shore_block):
 		return false
 
-	var raised_transform := global_transform.translated(
-		Vector3(0.0, 0.9, 0.0)
+	var block_above: int = world.get_block_world(
+		Vector3(
+			shore_x + 0.001,
+			shore_y + 1.001,
+			shore_z + 0.001
+		)
 	)
 
-	return not test_move(
-		raised_transform,
+	if block_above != AIR:
+		return false
+
+	# Make sure there is actually a horizontal obstruction at
+	# the shore. This prevents the water-jump from firing in open
+	# water just because a distant block happens to be nearby.
+	var forward_motion: Vector3 = (
+		horizontal_direction * 0.45
+	)
+
+	return test_move(
+		global_transform,
 		forward_motion
 	)
 
@@ -748,15 +772,17 @@ func _physics_process(delta: float) -> void:
 		)
 
 		# Jump from water onto a one-block shore when the
-		# swimming hitbox is blocked ahead but clear above.
+		# player is pressing forward + jump at the shoreline.
+		# Only trigger while not already rising so holding Space
+		# does not continuously re-boost the player.
 		if (
 			swimming
 			and moving_forward
 			and Input.is_action_pressed("jump")
+			and velocity.y <= 0.5
 			and _can_water_shore_jump(direction)
 		):
-			velocity.y = maxf(
-				velocity.y,
+			velocity.y = (
 				water_edge_jump_velocity_per_tick * 20.0
 			)
 
