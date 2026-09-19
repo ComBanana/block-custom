@@ -9,6 +9,14 @@ const DIRT: int = 2
 const STONE: int = 3
 const SAND: int = 4
 const WATER: int = 5
+const WATER_FLOW_1: int = 6
+const WATER_FLOW_2: int = 7
+const WATER_FLOW_3: int = 8
+const WATER_FLOW_4: int = 9
+const WATER_FLOW_5: int = 10
+const WATER_FLOW_6: int = 11
+const WATER_FLOW_7: int = 12
+const WATER_FALLING: int = 13
 
 const GRASS_TEXTURE := preload("res://textures/grass.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
@@ -819,6 +827,19 @@ func _add_block_faces(
 		)
 
 
+func _is_water(block_id: int) -> bool:
+	return block_id >= WATER and block_id <= WATER_FALLING
+
+
+func _water_height(block_id: int) -> float:
+	if block_id == WATER or block_id == WATER_FALLING:
+		return 15.0 / 16.0
+	if block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7:
+		var level: int = block_id - WATER_FLOW_1 + 1
+		return maxf(1.0 / 16.0, (8.0 - float(level)) / 8.0)
+	return 0.0
+
+
 func _add_water_block_faces(
 	surface_tool: SurfaceTool,
 	x: int,
@@ -826,7 +847,31 @@ func _add_water_block_faces(
 	z: int
 ) -> void:
 
-	const WATER_HEIGHT: float = 15.0 / 16.0
+	var position := Vector3(x, y, z)
+	var water_height: float = _water_height(get_block(x, y, z))
+	var above: int = get_block_for_mesh(x, y + 1, z)
+
+	if not _is_water(above):
+		_add_face(surface_tool, position, Vector3.UP, water_height)
+
+	var below: int = get_block_for_mesh(x, y - 1, z)
+	if below == AIR:
+		_add_face(surface_tool, position, Vector3.DOWN)
+
+	var neighbors := [
+		[Vector3.FORWARD, get_block_for_mesh(x, y, z - 1)],
+		[Vector3.BACK, get_block_for_mesh(x, y, z + 1)],
+		[Vector3.LEFT, get_block_for_mesh(x - 1, y, z)],
+		[Vector3.RIGHT, get_block_for_mesh(x + 1, y, z)]
+	]
+
+	for side in neighbors:
+		var normal: Vector3 = side[0]
+		var neighbor_id: int = side[1]
+		if not _is_water(neighbor_id):
+			_add_face(surface_tool, position, normal, water_height)
+		elif _water_height(neighbor_id) + 0.001 < water_height:
+			_add_face(surface_tool, position, normal, water_height)
 
 	var position := Vector3(
 		x,
