@@ -55,28 +55,35 @@ var collision_faces := PackedVector3Array()
 
 
 func _ready() -> void:
-	grass_material = StandardMaterial3D.new()
-	grass_material.albedo_texture = GRASS_TEXTURE
-	grass_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# World assigns shared materials before this node enters the tree.
+	# The fallback creation keeps Chunk.tscn safe to instantiate by itself.
+	if grass_material == null:
+		grass_material = StandardMaterial3D.new()
+		grass_material.albedo_texture = GRASS_TEXTURE
+		grass_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
-	dirt_material = StandardMaterial3D.new()
-	dirt_material.albedo_texture = DIRT_TEXTURE
-	dirt_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	if dirt_material == null:
+		dirt_material = StandardMaterial3D.new()
+		dirt_material.albedo_texture = DIRT_TEXTURE
+		dirt_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
-	stone_material = StandardMaterial3D.new()
-	stone_material.albedo_texture = STONE_TEXTURE
-	stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	if stone_material == null:
+		stone_material = StandardMaterial3D.new()
+		stone_material.albedo_texture = STONE_TEXTURE
+		stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
-	sand_material = StandardMaterial3D.new()
-	sand_material.albedo_texture = SAND_TEXTURE
-	sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	if sand_material == null:
+		sand_material = StandardMaterial3D.new()
+		sand_material.albedo_texture = SAND_TEXTURE
+		sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
-	water_material = StandardMaterial3D.new()
-	water_material.albedo_texture = WATER_TEXTURE
-	water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_material.albedo_color = Color(1.0, 1.0, 1.0, 0.5)
-	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if water_material == null:
+		water_material = StandardMaterial3D.new()
+		water_material.albedo_texture = WATER_TEXTURE
+		water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		water_material.albedo_color = Color(1.0, 1.0, 1.0, 0.5)
+		water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func _get_index(x: int, y: int, z: int) -> int:
@@ -497,16 +504,38 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	var solid_mesh := ArrayMesh.new()
 	var water_mesh := ArrayMesh.new()
 
-	_add_mesh_surface(solid_mesh, grass_material, buffer.grass_verts, buffer.grass_normals, buffer.grass_uvs)
-	_add_mesh_surface(solid_mesh, dirt_material, buffer.dirt_verts, buffer.dirt_normals, buffer.dirt_uvs)
-	_add_mesh_surface(solid_mesh, stone_material, buffer.stone_verts, buffer.stone_normals, buffer.stone_uvs)
-	_add_mesh_surface(solid_mesh, sand_material, buffer.sand_verts, buffer.sand_normals, buffer.sand_uvs)
-	_add_mesh_surface(water_mesh, water_material, buffer.water_verts, buffer.water_normals, buffer.water_uvs)
+	_add_mesh_surface(
+		solid_mesh,
+		grass_material,
+		buffer.grass
+	)
+	_add_mesh_surface(
+		solid_mesh,
+		dirt_material,
+		buffer.dirt
+	)
+	_add_mesh_surface(
+		solid_mesh,
+		stone_material,
+		buffer.stone
+	)
+	_add_mesh_surface(
+		solid_mesh,
+		sand_material,
+		buffer.sand
+	)
+	_add_mesh_surface(
+		water_mesh,
+		water_material,
+		buffer.water
+	)
 
 	$ChunkMesh.mesh = solid_mesh
 	$WaterMesh.mesh = water_mesh
 
-	collision_faces = PackedVector3Array(buffer.collision_faces)
+	# Packed arrays from the worker can be handed across directly;
+	# avoid another full conversion/copy on the main thread.
+	collision_faces = buffer.collision_faces
 	mesh_building = false
 	mesh_ready = true
 	collision_ready = false
@@ -515,20 +544,26 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 func _add_mesh_surface(
 	mesh: ArrayMesh,
 	material: Material,
-	verts: Array,
-	normals: Array,
-	uvs: Array
+	surface: ChunkMesher.MeshSurface
 ) -> void:
-	if verts.is_empty():
+	if surface.vertices.is_empty():
 		return
 
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array(verts)
-	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array(normals)
-	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array(uvs)
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(mesh.get_surface_count() - 1, material)
+	arrays[Mesh.ARRAY_VERTEX] = surface.vertices
+	arrays[Mesh.ARRAY_NORMAL] = surface.normals
+	arrays[Mesh.ARRAY_TEX_UV] = surface.uvs
+	arrays[Mesh.ARRAY_INDEX] = surface.indices
+
+	mesh.add_surface_from_arrays(
+		Mesh.PRIMITIVE_TRIANGLES,
+		arrays
+	)
+	mesh.surface_set_material(
+		mesh.get_surface_count() - 1,
+		material
+	)
 
 
 func clear_collision() -> void:
