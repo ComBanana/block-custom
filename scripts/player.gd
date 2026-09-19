@@ -430,6 +430,9 @@ func is_head_in_water() -> bool:
 
 
 func can_water_exit_jump() -> bool:
+	if not is_head_in_water():
+		return false
+
 	if not is_on_wall():
 		return false
 
@@ -476,6 +479,18 @@ func get_swim_direction(
 		direction = direction.normalized()
 
 	return direction
+
+
+func _is_grounded_for_jump() -> bool:
+	if is_on_floor():
+		return true
+
+	# Give jumping a tiny tolerance when Jolt reports the floor
+	# one frame late while the player is resting on a voxel.
+	return test_move(
+		global_transform,
+		Vector3(0.0, -0.08, 0.0)
+	)
 
 
 func _physics_process(delta: float) -> void:
@@ -601,7 +616,20 @@ func _physics_process(delta: float) -> void:
 	# WATER MOVEMENT
 	# ---------------------------------------------------------------
 
-	if in_water:
+	var grounded_for_jump: bool = _is_grounded_for_jump()
+
+	# If the player is grounded and their head is above the water,
+	# use normal ground physics. This prevents a water block touching
+	# the feet from disabling the normal Space jump.
+	var use_water_physics: bool = (
+		in_water
+		and not (
+			grounded_for_jump
+			and not head_in_water
+		)
+	)
+
+	if use_water_physics:
 
 		if swimming:
 
@@ -614,7 +642,6 @@ func _physics_process(delta: float) -> void:
 				water_swim_speed
 			)
 
-			# Horizontal swimming.
 			if direction != Vector3.ZERO:
 
 				velocity.x = move_toward(
@@ -629,66 +656,24 @@ func _physics_process(delta: float) -> void:
 					water_swim_acceleration * delta
 				)
 
-
-			# -------------------------------------------------------
-			# Vertical swimming
-			# -------------------------------------------------------
-
+			# Space = swim upward.
 			var target_vertical_velocity: float = (
 				direction.y *
 				water_swim_speed
 			)
 
-			# Space = swim upward.
 			if Input.is_action_pressed("jump"):
 
 				target_vertical_velocity = (
 					water_swim_up_speed
 				)
 
-			# Crouch = swim downward.
 			elif is_crouching:
 
 				target_vertical_velocity = (
 					-water_crouch_sink_speed
 				)
 
-			# No vertical input = gently descend.
-			elif absf(target_vertical_velocity) < 0.01:
-
-				target_vertical_velocity = (
-					-water_sink_speed
-				)
-
-			velocity.y = move_toward(
-					velocity.y,
-				target_vertical_velocity,
-				water_swim_acceleration * delta
-			)
-
-			# -------------------------------------------------------
-			# Vertical swimming
-			# -------------------------------------------------------
-
-			var target_vertical_velocity: float = (
-				direction.y * water_swim_speed
-			)
-
-			# Holding Jump makes the player swim upward.
-			if Input.is_action_pressed("jump"):
-
-				target_vertical_velocity = (
-					water_swim_up_speed
-				)
-
-			# Holding Crouch makes the player swim downward faster.
-			elif is_crouching:
-
-				target_vertical_velocity = (
-					-water_fast_sink_speed
-				)
-
-			# No vertical input: gently sink.
 			elif absf(target_vertical_velocity) < 0.01:
 
 				target_vertical_velocity = (
@@ -700,10 +685,6 @@ func _physics_process(delta: float) -> void:
 				target_vertical_velocity,
 				water_swim_acceleration * delta
 			)
-
-			# -------------------------------------------------------
-			# Water drag
-			# -------------------------------------------------------
 
 			var swim_horizontal_drag: float = pow(
 				water_swim_drag,
@@ -718,7 +699,6 @@ func _physics_process(delta: float) -> void:
 			velocity.x *= swim_horizontal_drag
 			velocity.z *= swim_horizontal_drag
 			velocity.y *= swim_vertical_drag
-
 
 		else:
 
@@ -755,21 +735,9 @@ func _physics_process(delta: float) -> void:
 				velocity.x *= horizontal_drag
 				velocity.z *= horizontal_drag
 
-
-			# -------------------------------------------------------
-			# Minecraft-style water vertical movement
-			# -------------------------------------------------------
-
-			# Water uses Minecraft's 0.08 blocks/tick² gravity,
-			# converted to Godot's seconds-based units.
+			# Water gravity / fluid drag.
 			velocity.y -= water_gravity * 0.5 * delta
 
-			# Minecraft's fluid falling adjustment heavily reduces
-			# downward acceleration in water.
-			#
-			# The 0.5 factor above is that reduction.
-			#
-			# Then water applies its 0.8 vertical drag.
 			var vertical_drag: float = pow(
 				water_vertical_drag,
 				delta * 20.0
@@ -777,18 +745,12 @@ func _physics_process(delta: float) -> void:
 
 			velocity.y *= vertical_drag
 
-			# Keep normal downward water movement around the
-			# Minecraft-style fluid-falling speed.
 			velocity.y = maxf(
 				velocity.y,
 				-water_sink_speed
 			)
 
-
-			# -------------------------------------------------------
-			# Crouch = sink faster
-			# -------------------------------------------------------
-
+			# Crouch = sink faster.
 			if is_crouching:
 				velocity.y = move_toward(
 					velocity.y,
@@ -796,11 +758,7 @@ func _physics_process(delta: float) -> void:
 					water_gravity * delta
 				)
 
-
-			# -------------------------------------------------------
-			# Space = rise
-			# -------------------------------------------------------
-
+			# Space = rise.
 			if Input.is_action_pressed("jump"):
 				velocity.y = move_toward(
 					velocity.y,
@@ -808,28 +766,24 @@ func _physics_process(delta: float) -> void:
 					water_swim_acceleration * delta
 				)
 
-
-	# ---------------------------------------------------------------
-	# NORMAL AIR / GROUND MOVEMENT
-	# ---------------------------------------------------------------
-
 	else:
 
-		# Gravity
-		if not is_on_floor():
+		# -------------------------------------------------------
+		# NORMAL AIR / GROUND MOVEMENT
+		# -------------------------------------------------------
 
+		# Gravity.
+		if not grounded_for_jump:
 			velocity.y -= gravity * delta
-
 		else:
-
 			if velocity.y < 0.0:
 				velocity.y = 0.0
 
+			# Holding Space keeps the Minecraft-style bunny-hop.
 			if Input.is_action_pressed("jump"):
 				velocity.y = jump_velocity
 
-
-		# Horizontal movement
+		# Horizontal movement.
 		is_crouching = Input.is_action_pressed("crouch")
 
 		var current_speed := walk_speed
@@ -843,8 +797,7 @@ func _physics_process(delta: float) -> void:
 
 		var target_velocity := direction * current_speed
 
-
-		if is_on_floor():
+		if grounded_for_jump:
 
 			if direction != Vector3.ZERO:
 
@@ -874,7 +827,6 @@ func _physics_process(delta: float) -> void:
 					ground_friction * delta
 				)
 
-
 		else:
 
 			velocity.x = move_toward(
@@ -902,6 +854,7 @@ func _physics_process(delta: float) -> void:
 
 	if (
 		in_water
+		and head_in_water
 		and Input.is_action_pressed("jump")
 		and can_water_exit_jump()
 	):
