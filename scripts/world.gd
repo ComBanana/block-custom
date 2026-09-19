@@ -39,9 +39,9 @@ const PRIORITY_FAR: int = 2
 @export var max_generation_tasks: int = 8
 @export var max_mesh_tasks: int = 6
 @export var mesh_columns_per_frame: int = 16
-@export var mesh_budget_ms: float = 3.0
-@export var max_mesh_chunks_per_frame: int = 12
-@export var collisions_per_frame: int = 3
+@export var mesh_budget_ms: float = 2.5
+@export var max_mesh_chunks_per_frame: int = 2
+@export var collisions_per_frame: int = 1
 @export var critical_chunk_distance: int = 2
 
 
@@ -67,6 +67,19 @@ const TERRAIN_GENERATOR := preload(
 	"res://scripts/terrain_generator.gd"
 )
 
+const GRASS_TEXTURE := preload("res://textures/grass.png")
+const DIRT_TEXTURE := preload("res://textures/dirt.png")
+const STONE_TEXTURE := preload("res://textures/stone.png")
+const SAND_TEXTURE := preload("res://textures/sand.png")
+const WATER_TEXTURE := preload("res://textures/water.png")
+
+var grass_material: StandardMaterial3D
+var dirt_material: StandardMaterial3D
+var stone_material: StandardMaterial3D
+var sand_material: StandardMaterial3D
+var water_material: StandardMaterial3D
+
+
 class GenerationResult:
 	var blocks: PackedByteArray
 	var chunk_coordinate: Vector2i
@@ -75,7 +88,11 @@ class GenerationResult:
 class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
-	var snapshot: PackedByteArray
+	var center_blocks: PackedByteArray
+	var neg_x_blocks: PackedByteArray
+	var pos_x_blocks: PackedByteArray
+	var neg_z_blocks: PackedByteArray
+	var pos_z_blocks: PackedByteArray
 	var buffer: ChunkMesher.MeshBuffer
 
 
@@ -541,6 +558,8 @@ var has_saved_player_position: bool = false
 
 
 func _ready() -> void:
+	_create_shared_materials()
+
 	render_distance = GameSettings.render_distance
 	world_name = GameSession.world_name
 	if world_name == "":
@@ -634,6 +653,32 @@ func _ready() -> void:
 	)
 
 	update_chunks()
+
+
+
+func _create_shared_materials() -> void:
+	grass_material = StandardMaterial3D.new()
+	grass_material.albedo_texture = GRASS_TEXTURE
+	grass_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	dirt_material = StandardMaterial3D.new()
+	dirt_material.albedo_texture = DIRT_TEXTURE
+	dirt_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	stone_material = StandardMaterial3D.new()
+	stone_material.albedo_texture = STONE_TEXTURE
+	stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	sand_material = StandardMaterial3D.new()
+	sand_material.albedo_texture = SAND_TEXTURE
+	sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	water_material = StandardMaterial3D.new()
+	water_material.albedo_texture = WATER_TEXTURE
+	water_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water_material.albedo_color = Color(1.0, 1.0, 1.0, 0.5)
+	water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func _process(delta: float) -> void:
@@ -918,6 +963,14 @@ func load_chunk(
 	chunk.hill_noise = hill_noise
 	chunk.mountain_region_noise = mountain_region_noise
 	chunk.mountain_shape_noise = mountain_shape_noise
+
+	# Share the same materials across every chunk. This avoids
+	# creating five new StandardMaterial3D resources per chunk.
+	chunk.grass_material = grass_material
+	chunk.dirt_material = dirt_material
+	chunk.stone_material = stone_material
+	chunk.sand_material = sand_material
+	chunk.water_material = water_material
 
 	loaded_chunks[chunk_coord] = chunk
 
@@ -1424,11 +1477,50 @@ func enqueue_player_edit(
 # Mesh processing
 # ===================================================================
 
+func _capture_mesh_inputs(
+	chunk_coord: Vector2i,
+	result: MeshResult
+) -> void:
+	var chunk = loaded_chunks[chunk_coord]
+
+	# Duplicating the compact block arrays is cheap compared to walking
+	# the scene tree and doing thousands of cross-chunk lookups.
+	result.center_blocks = chunk.blocks.duplicate()
+
+	var neighbor_coord := chunk_coord + Vector2i(-1, 0)
+	if loaded_chunks.has(neighbor_coord):
+		var neighbor = loaded_chunks[neighbor_coord]
+		if neighbor.is_generated:
+			result.neg_x_blocks = neighbor.blocks.duplicate()
+
+	neighbor_coord = chunk_coord + Vector2i(1, 0)
+	if loaded_chunks.has(neighbor_coord):
+		var neighbor = loaded_chunks[neighbor_coord]
+		if neighbor.is_generated:
+			result.pos_x_blocks = neighbor.blocks.duplicate()
+
+	neighbor_coord = chunk_coord + Vector2i(0, -1)
+	if loaded_chunks.has(neighbor_coord):
+		var neighbor = loaded_chunks[neighbor_coord]
+		if neighbor.is_generated:
+			result.neg_z_blocks = neighbor.blocks.duplicate()
+
+	neighbor_coord = chunk_coord + Vector2i(0, 1)
+	if loaded_chunks.has(neighbor_coord):
+		var neighbor = loaded_chunks[neighbor_coord]
+		if neighbor.is_generated:
+			result.pos_z_blocks = neighbor.blocks.duplicate()
+
+
 func _build_mesh_worker(
 	result: MeshResult
 ) -> void:
-	result.buffer = ChunkMesher.build(
-		result.snapshot
+	result.buffer = ChunkMesher.build_from_blocks(
+		result.center_blocks,
+		result.neg_x_blocks,
+		result.pos_x_blocks,
+		result.neg_z_blocks,
+		result.pos_z_blocks
 	)
 
 
@@ -1444,7 +1536,25 @@ func process_mesh_queue() -> void:
 		if WorkerThreadPool.is_task_completed(task_id):
 			completed_tasks.append(task_id)
 
+	var apply_start_usec: int = Time.get_ticks_usec()
+	var applied_count: int = 0
+
 	for task_id in completed_tasks:
+		if (
+			applied_count >= max_mesh_chunks_per_frame
+			and max_mesh_chunks_per_frame > 0
+		):
+			break
+
+		if (
+			applied_count > 0
+			and mesh_budget_ms > 0.0
+			and float(
+				Time.get_ticks_usec() - apply_start_usec
+			) / 1000.0 >= mesh_budget_ms
+		):
+			break
+
 		var result: MeshResult = mesh_tasks[task_id]
 
 		var wait_error: Error = (
@@ -1485,6 +1595,7 @@ func process_mesh_queue() -> void:
 		enqueue_collision_chunk(
 			result.chunk_coordinate
 		)
+		applied_count += 1
 
 	# ---------------------------------------------------------------
 	# SUBMIT NEW WORK
@@ -1521,7 +1632,10 @@ func process_mesh_queue() -> void:
 		var result := MeshResult.new()
 		result.chunk_coordinate = chunk_coord
 		result.job_id = chunk.mesh_job_id
-		result.snapshot = chunk.capture_mesh_snapshot()
+		_capture_mesh_inputs(
+			chunk_coord,
+			result
+		)
 
 		var mesh_callable: Callable = (
 			Callable(
