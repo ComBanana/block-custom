@@ -63,18 +63,6 @@ class MeshSurface:
 		indices.append(base_index + 2)
 		indices.append(base_index + 3)
 
-	func add_collision_quad(
-		v0: Vector3,
-		v1: Vector3,
-		v2: Vector3,
-		v3: Vector3
-	) -> void:
-		collision_vertices.append(v0)
-		collision_vertices.append(v1)
-		collision_vertices.append(v2)
-		collision_vertices.append(v0)
-		collision_vertices.append(v2)
-		collision_vertices.append(v3)
 
 
 class MeshBuffer:
