@@ -336,15 +336,15 @@ func _water_spread_horizontal(
 		next_level
 	)
 
-	var offsets := [
+	var offsets: Array[Vector3i] = [
 		Vector3i(-1, 0, 0),
 		Vector3i(1, 0, 0),
 		Vector3i(0, 0, -1),
 		Vector3i(0, 0, 1)
 	]
 
-	for offset in offsets:
-		var target := position + offset
+	for offset: Vector3i in offsets:
+		var target: Vector3i = position + offset
 		var target_id := _water_get(target)
 
 		if target_id == WATER or target_id == WATER_FALLING:
