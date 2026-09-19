@@ -6,6 +6,18 @@ const CHUNK_HEIGHT: int = 64
 
 const AIR: int = 0
 const GRASS: int = 1
+const DIRT: int = 2
+const STONE: int = 3
+const SAND: int = 4
+const WATER: int = 5
+const WATER_FLOW_1: int = 6
+const WATER_FLOW_2: int = 7
+const WATER_FLOW_3: int = 8
+const WATER_FLOW_4: int = 9
+const WATER_FLOW_5: int = 10
+const WATER_FLOW_6: int = 11
+const WATER_FLOW_7: int = 12
+const WATER_FALLING: int = 13
 
 const INVALID_CHUNK := Vector2i(999999, 999999)
 
@@ -34,6 +46,10 @@ const PRIORITY_FAR: int = 2
 
 @export_category("Collision")
 @export var collision_distance: int = 2
+
+@export_category("Water")
+@export var water_updates_per_frame: int = 64
+@export var water_tick_interval: float = 0.25
 
 
 var terrain_noise := FastNoiseLite.new()
@@ -113,11 +129,144 @@ var active_mesh_priority: int = PRIORITY_FAR
 
 
 # ===================================================================
+# Water physics
+# ===================================================================
+
+func _is_water(block_id: int) -> bool:
+	return block_id >= WATER and block_id <= WATER_FALLING
+
+func _is_water_source(block_id: int) -> bool:
+	return block_id == WATER
+
+func _water_flow_level(block_id: int) -> int:
+	if block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7:
+		return block_id - WATER_FLOW_1 + 1
+	return 0
+
+func _is_water_flowing(block_id: int) -> bool:
+	return block_id >= WATER_FLOW_1 and block_id <= WATER_FLOW_7
+
+func _water_schedule(position: Vector3i) -> void:
+	if position.y < 0 or position.y >= CHUNK_HEIGHT:
+		return
+	if not water_updates_queued.has(position):
+		water_update_queue.append(position)
+		water_updates_queued[position] = true
+
+func _water_schedule_neighbors(position: Vector3i) -> void:
+	_water_schedule(position + Vector3i(0, -1, 0))
+	_water_schedule(position + Vector3i(0, 1, 0))
+	_water_schedule(position + Vector3i(-1, 0, 0))
+	_water_schedule(position + Vector3i(1, 0, 0))
+	_water_schedule(position + Vector3i(0, 0, -1))
+	_water_schedule(position + Vector3i(0, 0, 1))
+
+func _water_get(position: Vector3i) -> int:
+	return get_block_world(Vector3(position.x + 0.001, position.y + 0.001, position.z + 0.001))
+
+func _water_set(position: Vector3i, block_id: int) -> bool:
+	if _water_get(position) == block_id:
+		return false
+	set_block_world(Vector3(position.x + 0.001, position.y + 0.001, position.z + 0.001), block_id, false)
+	return true
+
+func _water_count_source_neighbors(position: Vector3i) -> int:
+	var count := 0
+	for offset in [Vector3i(-1,0,0), Vector3i(1,0,0), Vector3i(0,0,-1), Vector3i(0,0,1)]:
+		if _water_get(position + offset) == WATER:
+			count += 1
+	return count
+
+func _water_try_source_conversion(position: Vector3i) -> bool:
+	var current := _water_get(position)
+	if current != AIR and not _is_water_flowing(current):
+		return false
+	if _water_count_source_neighbors(position) < 2:
+		return false
+	var below := _water_get(position + Vector3i(0,-1,0))
+	if below == AIR or _is_water(below):
+		return false
+	return _water_set(position, WATER)
+
+func _water_spread_horizontal(position: Vector3i, current_level: int) -> void:
+	var target_level := current_level + 1
+	if target_level > 7:
+		return
+	var offsets := [Vector3i(-1,0,0), Vector3i(1,0,0), Vector3i(0,0,-1), Vector3i(0,0,1)]
+	var drops: Array[Vector3i] = []
+	var opens: Array[Vector3i] = []
+	for offset in offsets:
+		var target := position + offset
+		var target_id := _water_get(target)
+		if target_id != AIR and not _is_water_flowing(target_id):
+			continue
+		if _water_get(target + Vector3i(0,-1,0)) == AIR:
+			drops.append(target)
+		else:
+			opens.append(target)
+	var targets := drops if not drops.is_empty() else opens
+	for target in targets:
+		var target_id := _water_get(target)
+		if target_id == WATER or target_id == WATER_FALLING:
+			continue
+		if _is_water_flowing(target_id) and _water_flow_level(target_id) <= target_level:
+			continue
+		_water_set(target, WATER + target_level)
+
+func _process_water_position(position: Vector3i) -> void:
+	var current := _water_get(position)
+	if not _is_water(current):
+		return
+	var below := position + Vector3i(0,-1,0)
+	if _water_get(below) == AIR:
+		_water_set(below, WATER_FALLING)
+		_water_schedule(below)
+		_water_schedule_neighbors(below)
+		return
+	var level := _water_flow_level(current)
+	if not _is_water_flowing(current):
+		level = 0
+	_water_try_source_conversion(position)
+	current = _water_get(position)
+	if current == WATER:
+		level = 0
+	_water_spread_horizontal(position, level)
+	_water_schedule_neighbors(position)
+
+func process_water_queue(delta: float) -> void:
+	water_tick_accumulator += delta
+	if water_tick_accumulator < water_tick_interval:
+		return
+	water_tick_accumulator = fmod(water_tick_accumulator, water_tick_interval)
+	var processed := 0
+	while processed < water_updates_per_frame and not water_update_queue.is_empty():
+		var position: Vector3i = water_update_queue.pop_front()
+		water_updates_queued.erase(position)
+		_process_water_position(position)
+		processed += 1
+
+func enqueue_water_updates_for_chunk(chunk_coord: Vector2i) -> void:
+	if not loaded_chunks.has(chunk_coord):
+		return
+	var chunk = loaded_chunks[chunk_coord]
+	if not chunk.is_generated:
+		return
+	const WATER_LEVEL: int = 10
+	for x in range(CHUNK_SIZE):
+		for z in range(CHUNK_SIZE):
+			if chunk.get_block(x, WATER_LEVEL, z) == WATER:
+				_water_schedule(Vector3i(chunk_coord.x * CHUNK_SIZE + x, WATER_LEVEL, chunk_coord.y * CHUNK_SIZE + z))
+
+# ===================================================================
 # Collision
 # ===================================================================
 
 var collision_queue: Array[Vector2i] = []
 var collision_queued: Dictionary = {}
+
+var water_update_queue: Array[Vector3i] = []
+var water_updates_queued: Dictionary = {}
+var water_tick_accumulator: float = 0.0
 
 
 # ===================================================================
@@ -190,6 +339,7 @@ func _process(_delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 	process_mesh_queue()
+	process_water_queue(delta)
 	process_collision_queue()
 
 	if not player_spawned:
@@ -561,6 +711,7 @@ func process_generation_queue() -> void:
 			generated_data
 		)
 
+		enqueue_water_updates_for_chunk(chunk_coord)
 
 		enqueue_mesh_chunk(
 			chunk_coord
@@ -1347,7 +1498,8 @@ func get_block_world(
 
 func set_block_world(
 	world_position: Vector3,
-	block_id: int
+	block_id: int,
+	schedule_water: bool = true
 ) -> void:
 
 	var chunk_coord := world_to_chunk(
@@ -1389,16 +1541,17 @@ func set_block_world(
 	if local_z < 0 or local_z >= CHUNK_SIZE:
 		return
 
-	chunk.set_block(
-		local_x,
-		local_y,
-		local_z,
-		block_id
-	)
+	var old_block_id: int = chunk.get_block(local_x, local_y, local_z)
 
-	enqueue_player_edit(
-		chunk_coord
-	)
+	chunk.set_block(local_x, local_y, local_z, block_id)
+
+	enqueue_player_edit(chunk_coord)
+
+	if schedule_water and old_block_id != block_id:
+		var changed := Vector3i(floori(world_position.x), floori(world_position.y), floori(world_position.z))
+		if _is_water(old_block_id) or _is_water(block_id):
+			_water_schedule(changed)
+			_water_schedule_neighbors(changed)
 
 	# Update neighboring chunk if the edited voxel is on an edge.
 	if local_x == 0:
