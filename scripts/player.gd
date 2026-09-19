@@ -846,34 +846,6 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
-	# ---------------------------------------------------------------
-	# Water → shore hop
-	# ---------------------------------------------------------------
-
-	# Re-check the water state after movement. A player can still
-	# have their feet in water while their normal standing head
-	# position has already reached the shore.
-	var post_move_in_water: bool = is_in_water()
-	var post_move_head_in_water: bool = is_head_in_water()
-	var post_move_standing_head_in_water: bool = _is_water_block(
-		world.get_block_world(
-			global_position +
-			Vector3(0.0, STANDING_CAMERA_HEIGHT, 0.0)
-		)
-	)
-
-	if (
-		in_water
-		and head_in_water
-		and moving_forward
-		and Input.is_action_pressed("jump")
-		and not post_move_standing_head_in_water
-		and _can_water_edge_jump()
-	):
-		velocity.y = (
-			water_edge_jump_velocity_per_tick * 20.0
-		)
-
 	# Re-check the pose after movement so leaving the water
 	# immediately transitions to standing or crawling.
 	if (
