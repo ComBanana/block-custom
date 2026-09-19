@@ -1819,7 +1819,10 @@ func get_spawn_area_ready() -> int:
 			-spawn_load_radius,
 			spawn_load_radius + 1
 		):
-			var chunk_coord := Vector2i(x, z)
+			var chunk_coord := Vector2i(
+				player_chunk.x + x,
+				player_chunk.y + z
+			)
 
 			if not loaded_chunks.has(chunk_coord):
 				continue
