@@ -9,6 +9,7 @@ extends CharacterBody3D
 @export var sprint_speed: float = 5.6
 @export var jump_velocity: float = 8.0
 @export var gravity: float = 28.0
+@export var crouch_speed: float = 1.3
 
 @export_category("Movement Feel")
 @export var ground_acceleration: float = 35.0
@@ -16,7 +17,6 @@ extends CharacterBody3D
 @export var air_acceleration: float = 7.0
 
 @export_category("Water")
-
 @export var water_walk_speed: float = 1.8
 @export var water_swim_speed: float = 5.6
 
@@ -27,13 +27,16 @@ extends CharacterBody3D
 @export var water_swim_drag: float = 0.9
 @export var water_vertical_drag: float = 0.8
 
-@export var water_sink_speed: float = 0.35
-@export var water_fast_sink_speed: float = 1.5
+@export var water_gravity: float = 8.0
+@export var water_sink_speed: float = 1.2
+@export var water_fast_sink_speed: float = 3.0
 
-@export var water_swim_up_speed: float = 2.5
+@export var water_swim_up_speed: float = 3
+@export var water_exit_jump_velocity: float = 6.0
 @export var water_swim_down_speed: float = 2.5
 
 const WATER: int = 5
+
 
 # =========================
 # Mouse Look
@@ -59,8 +62,8 @@ const BLOCK_RAY_LENGTH := 4.5
 @export var fov_change_speed: float = 8.0
 
 var normal_fov: float
-
 var controls_enabled: bool = false
+var is_crouching: bool = false
 
 var break_requested: bool = false
 var place_requested: bool = false
@@ -262,6 +265,24 @@ func is_head_in_water() -> bool:
 	)
 
 
+func can_water_exit_jump() -> bool:
+	if not is_on_wall():
+		return false
+
+	# Minecraft's water escape behavior checks whether
+	# there is enough free space above the player.
+	var motion := Vector3(
+		0.0,
+		0.75,
+		0.0
+	)
+
+	return not test_move(
+		global_transform,
+		motion
+	)
+
+
 func is_swimming() -> bool:
 	return (
 		is_in_water()
@@ -304,9 +325,17 @@ func _physics_process(delta: float) -> void:
 
 	var in_water: bool = is_in_water()
 	var head_in_water: bool = is_head_in_water()
+
+	is_crouching = Input.is_action_pressed("crouch")
+
+	var sprinting: bool = (
+		Input.is_action_pressed("sprint")
+		and not is_crouching
+	)
+
 	var swimming: bool = (
 		in_water
-		and Input.is_action_pressed("sprint")
+		and sprinting
 	)
 
 	var input_vector := Input.get_vector(
@@ -323,7 +352,7 @@ func _physics_process(delta: float) -> void:
 	var target_fov := normal_fov
 
 	if (
-		Input.is_action_pressed("sprint")
+		sprinting
 		and input_vector.length_squared() > 0.0
 	):
 		target_fov = (
@@ -426,10 +455,15 @@ func _physics_process(delta: float) -> void:
 					water_swim_acceleration * delta
 				)
 
+				var target_sink_speed: float = water_sink_speed
+
+				if is_crouching:
+					target_sink_speed = water_fast_sink_speed
+
 				velocity.y = move_toward(
 					velocity.y,
-					target_velocity.y,
-					water_swim_acceleration * delta
+					-target_sink_speed,
+					water_gravity * delta
 				)
 
 				velocity.z = move_toward(
@@ -505,24 +539,21 @@ func _physics_process(delta: float) -> void:
 
 
 			# -------------------------------------------------------
-			# Space = rise
-			# Shift = sink faster
+			# Space = hop upward
 			# -------------------------------------------------------
 
 			if Input.is_action_pressed("jump"):
-
 				velocity.y = move_toward(
 					velocity.y,
 					water_swim_up_speed,
-					water_swim_up_speed * 4.0 * delta
+					water_swim_acceleration * delta
 				)
 
-			var vertical_drag: float = pow(
-				water_vertical_drag,
-				delta * 20.0
-			)
-
-			velocity.y *= vertical_drag
+			if velocity.y < 0.0:
+				velocity.y *= pow(
+					water_vertical_drag,
+					delta * 20.0
+				)
 
 
 	# ---------------------------------------------------------------
@@ -541,20 +572,21 @@ func _physics_process(delta: float) -> void:
 			if velocity.y < 0.0:
 				velocity.y = 0.0
 
-			if Input.is_action_just_pressed("jump"):
+			if Input.is_action_pressed("jump"):
 				velocity.y = jump_velocity
 
 
 		# Horizontal movement
+		is_crouching = Input.is_action_pressed("crouch")
+
 		var current_speed := walk_speed
 
-		if Input.is_action_pressed("sprint"):
+		if sprinting:
 			current_speed = sprint_speed
+		elif is_crouching:
+			current_speed = crouch_speed
 
-		var target_velocity := (
-			direction *
-			current_speed
-		)
+		var target_velocity := direction * current_speed
 
 
 		if is_on_floor():
@@ -608,3 +640,14 @@ func _physics_process(delta: float) -> void:
 	# ---------------------------------------------------------------
 
 	move_and_slide()
+
+	# ---------------------------------------------------------------
+	# Water → shore hop
+	# ---------------------------------------------------------------
+
+	if (
+		in_water
+		and Input.is_action_pressed("jump")
+		and can_water_exit_jump()
+	):
+		velocity.y = water_exit_jump_velocity
