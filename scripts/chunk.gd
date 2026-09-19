@@ -853,7 +853,7 @@ func _add_water_block_faces(
 	var water_height: float = _water_height(block_id)
 
 	var above: int = get_block_for_mesh(x, y + 1, z)
-	if not _is_water(above):
+	if above == AIR:
 		_add_face(
 			surface_tool,
 			position,
@@ -880,7 +880,7 @@ func _add_water_block_faces(
 		var normal: Vector3 = side[0]
 		var neighbor_id: int = side[1]
 
-		if not _is_water(neighbor_id):
+		if neighbor_id == AIR:
 			_add_face(
 				surface_tool,
 				position,
