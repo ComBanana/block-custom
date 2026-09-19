@@ -112,3 +112,5 @@ def test_vanilla_tick_model_has_expected_vertical_behavior():
     assert math.isclose(normal_y, -0.02, abs_tol=0.0005)
     assert math.isclose(sprint_y, 0.16, abs_tol=0.0005)
     assert math.isclose(crouch_y, -0.18, abs_tol=0.0005)
+
+# CI: keep this regression suite runnable with the repository workflow.
