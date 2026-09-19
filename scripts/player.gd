@@ -491,6 +491,9 @@ func _physics_process(delta: float) -> void:
 	var head_in_water: bool = is_head_in_water()
 
 	is_crouching = Input.is_action_pressed("crouch")
+	var moving_forward: bool = Input.is_action_pressed(
+		"move_forward"
+	)
 
 	var sprinting: bool = (
 		Input.is_action_pressed("sprint")
