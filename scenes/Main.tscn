@@ -33,6 +33,30 @@ transform = Transform3D(0.8660254, 0.38302222, -0.32139382, 0, 0.64278764, 0.766
 
 [node name="Player" parent="." unique_id=282764273 instance=ExtResource("1_elqb8")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 8)
+walk_speed = null
+sprint_speed = null
+jump_velocity = null
+gravity = null
+crouch_speed = null
+ground_acceleration = null
+ground_friction = null
+air_acceleration = null
+water_walk_speed = null
+water_swim_speed = null
+water_acceleration = null
+water_swim_acceleration = null
+water_drag = null
+water_swim_drag = null
+water_vertical_drag = null
+water_gravity = null
+water_sink_speed = null
+water_fast_sink_speed = null
+water_swim_up_speed = null
+water_exit_jump_velocity = null
+water_swim_down_speed = null
+mouse_sensitivity = null
+sprint_fov_multiplier = null
+fov_change_speed = null
 
 [node name="Audio" type="Node" parent="." unique_id=1859972468]
 

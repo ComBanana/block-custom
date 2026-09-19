@@ -27,11 +27,19 @@ extends CharacterBody3D
 @export var water_swim_drag: float = 0.9
 @export var water_vertical_drag: float = 0.8
 
-@export var water_gravity: float = 8.0
-@export var water_sink_speed: float = 1.2
-@export var water_fast_sink_speed: float = 3.0
+# Minecraft gravity is 0.08 blocks/tick².
+# Converted to Godot's seconds-based physics units:
+# 0.08 × 20 × 20 = 32 blocks/second².
+@export var water_gravity: float = 32.0
 
-@export var water_swim_up_speed: float = 3
+# Approximate terminal downward speed produced by
+# Minecraft-style fluid falling + water drag.
+@export var water_sink_speed: float = 3.2
+
+# Additional downward control while crouching.
+@export var water_crouch_sink_speed: float = 6.4
+
+@export var water_swim_up_speed: float = 3.0
 @export var water_exit_jump_velocity: float = 6.0
 @export var water_swim_down_speed: float = 2.5
 
@@ -621,6 +629,43 @@ func _physics_process(delta: float) -> void:
 					water_swim_acceleration * delta
 				)
 
+
+			# -------------------------------------------------------
+			# Vertical swimming
+			# -------------------------------------------------------
+
+			var target_vertical_velocity: float = (
+				direction.y *
+				water_swim_speed
+			)
+
+			# Space = swim upward.
+			if Input.is_action_pressed("jump"):
+
+				target_vertical_velocity = (
+					water_swim_up_speed
+				)
+
+			# Crouch = swim downward.
+			elif is_crouching:
+
+				target_vertical_velocity = (
+					-water_crouch_sink_speed
+				)
+
+			# No vertical input = gently descend.
+			elif absf(target_vertical_velocity) < 0.01:
+
+				target_vertical_velocity = (
+					-water_sink_speed
+				)
+
+			velocity.y = move_toward(
+					velocity.y,
+				target_vertical_velocity,
+				water_swim_acceleration * delta
+			)
+
 			# -------------------------------------------------------
 			# Vertical swimming
 			# -------------------------------------------------------
@@ -712,18 +757,48 @@ func _physics_process(delta: float) -> void:
 
 
 			# -------------------------------------------------------
-			# Natural sinking
+			# Minecraft-style water vertical movement
 			# -------------------------------------------------------
 
-			velocity.y = move_toward(
+			# Water uses Minecraft's 0.08 blocks/tick² gravity,
+			# converted to Godot's seconds-based units.
+			velocity.y -= water_gravity * 0.5 * delta
+
+			# Minecraft's fluid falling adjustment heavily reduces
+			# downward acceleration in water.
+			#
+			# The 0.5 factor above is that reduction.
+			#
+			# Then water applies its 0.8 vertical drag.
+			var vertical_drag: float = pow(
+				water_vertical_drag,
+				delta * 20.0
+			)
+
+			velocity.y *= vertical_drag
+
+			# Keep normal downward water movement around the
+			# Minecraft-style fluid-falling speed.
+			velocity.y = maxf(
 				velocity.y,
-				-water_sink_speed,
-				water_vertical_drag * delta
+				-water_sink_speed
 			)
 
 
 			# -------------------------------------------------------
-			# Space = hop upward
+			# Crouch = sink faster
+			# -------------------------------------------------------
+
+			if is_crouching:
+				velocity.y = move_toward(
+					velocity.y,
+					-water_crouch_sink_speed,
+					water_gravity * delta
+				)
+
+
+			# -------------------------------------------------------
+			# Space = rise
 			# -------------------------------------------------------
 
 			if Input.is_action_pressed("jump"):
@@ -731,12 +806,6 @@ func _physics_process(delta: float) -> void:
 					velocity.y,
 					water_swim_up_speed,
 					water_swim_acceleration * delta
-				)
-
-			if velocity.y < 0.0:
-				velocity.y *= pow(
-					water_vertical_drag,
-					delta * 20.0
 				)
 
 
