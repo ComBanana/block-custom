@@ -27,6 +27,8 @@ extends Control
 @onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
 
 @onready var username_input: LineEdit = $UsernamePanel/VBox/UsernameInput
+@onready var username_save_button: Button = $UsernamePanel/VBox/SaveButton
+@onready var username_saved_label: Label = $UsernamePanel/VBox/SavedLabel
 @onready var username_error: Label = $UsernamePanel/VBox/ErrorLabel
 
 var worlds: Array[Dictionary] = []
@@ -39,6 +41,7 @@ func _ready() -> void:
 	controls_button.pressed.connect(_on_controls_tab_pressed)
 	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
 	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
+	username_save_button.pressed.connect(_on_username_save_pressed)
 	get_tree().paused = false
 	_show_panel(main_panel)
 
@@ -57,13 +60,11 @@ func _show_panel(panel: Control) -> void:
 
 
 func _on_play_pressed() -> void:
-	_save_username()
 	_refresh_worlds()
 	_show_panel(worlds_panel)
 
 
 func _on_create_pressed() -> void:
-	_save_username()
 	world_name_input.text = _default_world_name()
 	seed_input.text = ""
 	create_error.text = ""
@@ -103,34 +104,43 @@ func _update_toggle_buttons() -> void:
 	)
 
 
-func _on_username_submitted(_value: String) -> void:
-	_save_username()
-
-
-func _on_username_focus_exited() -> void:
-	_save_username()
-
-
 func _load_username_ui() -> void:
 	username_input.text = GameSettings.username
 	username_error.text = ""
+	username_saved_label.visible = false
 
 
-func _save_username() -> void:
+func _on_username_save_pressed() -> void:
 	var entered := username_input.text.strip_edges()
-	var cleaned := GameSettings.sanitize_username(entered)
 
-	if entered != "" and cleaned == "Player" and entered != "Player":
+	if entered.length() < 3 or entered.length() > 16:
 		username_error.text = "Use 3-16 letters, numbers, or _."
+		username_saved_label.visible = false
 		return
 
-	GameSettings.set_username(cleaned)
+	for character in entered:
+		if not (
+			(character >= "a" and character <= "z")
+			or (character >= "A" and character <= "Z")
+			or (character >= "0" and character <= "9")
+			or character == "_"
+		):
+			username_error.text = "Use 3-16 letters, numbers, or _."
+			username_saved_label.visible = false
+			return
+
+	GameSettings.set_username(entered)
 	username_input.text = GameSettings.username
 	username_error.text = ""
+	username_saved_label.visible = true
+	get_tree().create_timer(1.2).timeout.connect(
+		func():
+			if is_instance_valid(username_saved_label):
+				username_saved_label.visible = false
+	)
 
 
 func _on_quit_pressed() -> void:
-	_save_username()
 	get_tree().quit()
 
 
