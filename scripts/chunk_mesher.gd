@@ -2,7 +2,7 @@ extends RefCounted
 class_name ChunkMesher
 
 const CHUNK_SIZE: int = 16
-const CHUNK_HEIGHT: int = 64
+const CHUNK_HEIGHT: int = 256
 const PADDED_SIZE: int = CHUNK_SIZE + 2
 const PADDED_HEIGHT: int = CHUNK_HEIGHT + 2
 const CHUNK_VOLUME: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
