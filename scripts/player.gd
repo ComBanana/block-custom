@@ -593,10 +593,12 @@ func _physics_process(delta: float) -> void:
 
 	var in_water: bool = is_in_water()
 	var head_in_water: bool = is_head_in_water()
-	if not in_water and _water_below_feet() and not _solid_below_feet():
-		in_water = true
 
-	if in_water or (_water_below_feet() and not _solid_below_feet()):
+	# is_in_water() is the authoritative water-state test. Do not
+	# override it with a "water below feet" check: at the edge of a
+	# solid block, the center voxel can be water even while the player
+	# is still standing on solid ground.
+	if in_water:
 		floor_snap_length = 0.0
 	else:
 		floor_snap_length = 0.1
