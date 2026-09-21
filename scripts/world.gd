@@ -37,6 +37,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 @export_category("Loading")
 @export var spawn_load_radius: int = 1
+@export var loading_generation_boost: int = 4
+@export var loading_mesh_boost: int = 2
+@export var loading_mesh_apply_boost: int = 2
+@export var loading_collision_boost: int = 3
 
 
 @export_category("Streaming")
@@ -73,6 +77,9 @@ var chunk_scene := preload("res://scenes/Chunk.tscn")
 const TERRAIN_GENERATOR := preload(
 	"res://scripts/terrain_generator.gd"
 )
+const GENERATION_PROFILER := preload(
+	"res://scripts/generation_profiler.gd"
+)
 
 const GRASS_TEXTURE := preload("res://textures/grass.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
@@ -96,11 +103,14 @@ var world_time_minutes: float = DEFAULT_TIME_MINUTES
 class GenerationResult:
 	var blocks: PackedByteArray
 	var chunk_coordinate: Vector2i
+	var terrain_ms: float = 0.0
 
 
 class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
+	var capture_ms: float = 0.0
+	var mesh_ms: float = 0.0
 	var center_blocks: PackedByteArray
 	var neg_x_blocks: PackedByteArray
 	var pos_x_blocks: PackedByteArray
@@ -151,6 +161,13 @@ var generation_queued: Dictionary = {}
 
 var generation_tasks: Dictionary = {}
 var mesh_tasks: Dictionary = {}
+
+var stream_direction := Vector2.ZERO
+var stream_speed: float = 0.0
+var adaptive_streaming_enabled: bool = true
+var scheduler_scan_limit: int = 32
+
+var generation_profiler: GenerationProfiler = GENERATION_PROFILER.new()
 
 
 # ===================================================================
@@ -1017,6 +1034,7 @@ func _create_shared_materials() -> void:
 
 func _process(delta: float) -> void:
 	_update_day_night(delta)
+	_update_stream_prediction()
 
 	if player_spawned:
 		if statistics_initialized:
@@ -1054,6 +1072,177 @@ func _process(delta: float) -> void:
 	if not player_spawned:
 		update_loading_progress()
 		try_spawn_player()
+
+
+# ===================================================================
+# Adaptive streaming and profiling
+# ===================================================================
+
+func _update_stream_prediction() -> void:
+	if not player_spawned:
+		return
+
+	var horizontal_velocity := Vector2(
+		player.velocity.x,
+		player.velocity.z
+	)
+	var speed := horizontal_velocity.length()
+
+	if speed > 0.15:
+		stream_direction = horizontal_velocity / speed
+		stream_speed = lerpf(stream_speed, speed, 0.25)
+	else:
+		stream_speed = move_toward(
+			stream_speed,
+			0.0,
+			maxf(get_process_delta_time() * 10.0, 0.01)
+		)
+
+
+func _available_worker_budget() -> int:
+	return maxi(1, OS.get_processor_count() - 1)
+
+
+func _generation_task_limit() -> int:
+	if max_generation_tasks <= 0:
+		return 0
+
+	var limit := max_generation_tasks
+	if adaptive_streaming_enabled and not player_spawned:
+		limit += loading_generation_boost
+
+	return mini(limit, _available_worker_budget())
+
+
+func _mesh_task_limit() -> int:
+	if max_mesh_tasks <= 0:
+		return 0
+
+	var limit := max_mesh_tasks
+	if adaptive_streaming_enabled and not player_spawned:
+		limit += loading_mesh_boost
+
+	return mini(limit, _available_worker_budget())
+
+
+func _mesh_apply_limit() -> int:
+	var limit := max_mesh_chunks_per_frame
+	if adaptive_streaming_enabled and not player_spawned:
+		limit += loading_mesh_apply_boost
+	return maxi(limit, 1)
+
+
+func _mesh_apply_budget_ms() -> float:
+	if not adaptive_streaming_enabled or player_spawned:
+		return mesh_budget_ms
+	if mesh_budget_ms <= 0.0:
+		return 0.0
+	return mesh_budget_ms + 5.0
+
+
+func _collision_work_limit() -> int:
+	var limit := collisions_per_frame
+	if adaptive_streaming_enabled and not player_spawned:
+		limit += loading_collision_boost
+	return maxi(limit, 1)
+
+
+func _chunk_stream_score(chunk_coord: Vector2i) -> float:
+	var offset := Vector2(
+		float(chunk_coord.x - player_chunk.x),
+		float(chunk_coord.y - player_chunk.y)
+	)
+	var distance_squared := offset.length_squared()
+
+	if distance_squared <= 0.01:
+		return 100000.0
+
+	var score := -distance_squared * 1.25
+
+	if is_chunk_critical(chunk_coord):
+		score += 10000.0
+
+	if stream_direction.length_squared() > 0.01:
+		var alignment := offset.normalized().dot(stream_direction)
+		score += alignment * (12.0 + minf(stream_speed * 2.5, 24.0))
+
+	return score
+
+
+func _take_best_generation_candidate(
+	queue: Array[Vector2i],
+	queued: Dictionary
+) -> Vector2i:
+	var best_index := -1
+	var best_score := -INF
+	var scan_count := mini(queue.size(), scheduler_scan_limit)
+
+	for index in range(scan_count):
+		var coord: Vector2i = queue[index]
+
+		if (
+			not queued.has(coord)
+			or not loaded_chunks.has(coord)
+			or not _is_chunk_needed(coord)
+		):
+			continue
+
+		var chunk = loaded_chunks[coord]
+		if chunk.is_generated:
+			continue
+
+		var score := _chunk_stream_score(coord)
+		if score > best_score:
+			best_score = score
+			best_index = index
+
+	if best_index == -1:
+		return INVALID_CHUNK
+
+	var selected: Vector2i = queue[best_index]
+	queue.remove_at(best_index)
+	queued.erase(selected)
+	return selected
+
+
+func _take_best_mesh_candidate(
+	queue: Array[Vector2i],
+	queued: Dictionary
+) -> Vector2i:
+	var best_index := -1
+	var best_score := -INF
+	var scan_count := mini(queue.size(), scheduler_scan_limit)
+
+	for index in range(scan_count):
+		var coord: Vector2i = queue[index]
+
+		if (
+			not queued.has(coord)
+			or not loaded_chunks.has(coord)
+			or not _is_chunk_needed(coord)
+		):
+			continue
+
+		var chunk = loaded_chunks[coord]
+		if not chunk.is_generated or chunk.mesh_building:
+			continue
+
+		var score := _chunk_stream_score(coord)
+		if score > best_score:
+			best_score = score
+			best_index = index
+
+	if best_index == -1:
+		return INVALID_CHUNK
+
+	var selected: Vector2i = queue[best_index]
+	queue.remove_at(best_index)
+	queued.erase(selected)
+	return selected
+
+
+func get_generation_profile() -> String:
+	return generation_profiler.get_summary()
 
 
 # ===================================================================
@@ -1431,6 +1620,9 @@ func load_chunk(
 ) -> void:
 
 	var chunk = chunk_scene.instantiate()
+	chunk.set_generation_stage(
+		Chunk.GenerationStage.LOADING
+	)
 
 	chunk.position = Vector3(
 		chunk_coord.x * CHUNK_SIZE,
@@ -1496,12 +1688,16 @@ func _generate_chunk_worker(
 ) -> void:
 
 	result.chunk_coordinate = chunk_coordinate
+	var start_usec := Time.get_ticks_usec()
 	result.blocks = (
 		TERRAIN_GENERATOR.generate_chunk_data(
 			chunk_coordinate,
 			seed
 		)
 	)
+	result.terrain_ms = float(
+		Time.get_ticks_usec() - start_usec
+	) / 1000.0
 
 
 # ===================================================================
@@ -1606,13 +1802,14 @@ func process_generation_queue() -> void:
 	# SUBMIT NEW GENERATION TASKS
 	# ---------------------------------------------------------------
 
-	if max_generation_tasks <= 0:
+	var generation_limit := _generation_task_limit()
+	if generation_limit <= 0:
 		return
 
 
 	while (
 		generation_tasks.size()
-		< max_generation_tasks
+		< generation_limit
 	):
 
 		var chunk_coord: Vector2i = (
@@ -1689,108 +1886,17 @@ func process_generation_queue() -> void:
 
 
 func get_next_generation_candidate() -> Vector2i:
+	var critical := _take_best_generation_candidate(
+		critical_generation_queue,
+		critical_generation_queued
+	)
+	if critical != INVALID_CHUNK:
+		return critical
 
-	# ---------------------------------------------------------------
-	# CRITICAL GENERATION
-	# ---------------------------------------------------------------
-
-	while not critical_generation_queue.is_empty():
-
-		var critical_coord: Vector2i = (
-			critical_generation_queue.pop_front()
-		)
-
-		critical_generation_queued.erase(
-			critical_coord
-		)
-
-
-		if not loaded_chunks.has(
-			critical_coord
-		):
-			continue
-
-
-		if not _is_chunk_needed(
-			critical_coord
-		):
-			continue
-
-
-		var critical_chunk = loaded_chunks[
-			critical_coord
-		]
-
-
-		if critical_chunk.is_generated:
-			continue
-
-
-		return critical_coord
-
-
-	# ---------------------------------------------------------------
-	# NORMAL GENERATION
-	# ---------------------------------------------------------------
-
-	while not generation_queue.is_empty():
-
-		var chunk_coord: Vector2i = (
-			generation_queue.pop_front()
-		)
-
-		generation_queued.erase(
-			chunk_coord
-		)
-
-
-		if not loaded_chunks.has(
-			chunk_coord
-		):
-			continue
-
-
-		if not _is_chunk_needed(
-			chunk_coord
-		):
-			continue
-
-
-		var chunk = loaded_chunks[
-			chunk_coord
-		]
-
-
-		if chunk.is_generated:
-			continue
-
-
-		# A chunk can become critical while waiting in
-		# the normal queue.
-		if (
-			is_chunk_critical(chunk_coord)
-			or _is_chunk_teleport_required(chunk_coord)
-		):
-
-			if not critical_generation_queued.has(
-				chunk_coord
-			):
-
-				critical_generation_queue.push_back(
-					chunk_coord
-				)
-
-				critical_generation_queued[
-					chunk_coord
-				] = true
-
-			continue
-
-
-		return chunk_coord
-
-
-	return INVALID_CHUNK
+	return _take_best_generation_candidate(
+		generation_queue,
+		generation_queued
+	)
 
 
 # ===================================================================
@@ -1970,6 +2076,7 @@ func _capture_mesh_inputs(
 	chunk_coord: Vector2i,
 	result: MeshResult
 ) -> void:
+	var start_usec := Time.get_ticks_usec()
 	var chunk = loaded_chunks[chunk_coord]
 
 	# Duplicating the compact block arrays is cheap compared to walking
@@ -2000,10 +2107,15 @@ func _capture_mesh_inputs(
 		if neighbor.is_generated:
 			result.pos_z_blocks = neighbor.blocks.duplicate()
 
+	result.capture_ms = float(
+		Time.get_ticks_usec() - start_usec
+	) / 1000.0
+
 
 func _build_mesh_worker(
 	result: MeshResult
 ) -> void:
+	var start_usec := Time.get_ticks_usec()
 	result.buffer = ChunkMesher.build_from_blocks(
 		result.center_blocks,
 		result.neg_x_blocks,
@@ -2011,6 +2123,9 @@ func _build_mesh_worker(
 		result.neg_z_blocks,
 		result.pos_z_blocks
 	)
+	result.mesh_ms = float(
+		Time.get_ticks_usec() - start_usec
+	) / 1000.0
 
 
 func process_mesh_queue() -> void:
@@ -2030,17 +2145,17 @@ func process_mesh_queue() -> void:
 
 	for task_id in completed_tasks:
 		if (
-			applied_count >= max_mesh_chunks_per_frame
-			and max_mesh_chunks_per_frame > 0
+			applied_count >= _mesh_apply_limit()
+			and _mesh_apply_limit() > 0
 		):
 			break
 
 		if (
 			applied_count > 0
-			and mesh_budget_ms > 0.0
+			and _mesh_apply_budget_ms() > 0.0
 			and float(
 				Time.get_ticks_usec() - apply_start_usec
-			) / 1000.0 >= mesh_budget_ms
+			) / 1000.0 >= _mesh_apply_budget_ms()
 		):
 			break
 
@@ -2080,7 +2195,12 @@ func process_mesh_queue() -> void:
 			)
 			continue
 
+		var apply_start_usec := Time.get_ticks_usec()
 		chunk.apply_mesh_buffer(result.buffer)
+		generation_profiler.record(
+			"mesh_apply",
+			float(Time.get_ticks_usec() - apply_start_usec) / 1000.0
+		)
 		enqueue_collision_chunk(
 			result.chunk_coordinate
 		)
@@ -2090,10 +2210,11 @@ func process_mesh_queue() -> void:
 	# SUBMIT NEW WORK
 	# ---------------------------------------------------------------
 
-	if max_mesh_tasks <= 0:
+	var mesh_limit := _mesh_task_limit()
+	if mesh_limit <= 0:
 		return
 
-	while mesh_tasks.size() < max_mesh_tasks:
+	while mesh_tasks.size() < mesh_limit:
 		var chunk_coord: Vector2i = (
 			get_next_mesh_candidate()
 		)
@@ -2152,102 +2273,37 @@ func process_mesh_queue() -> void:
 
 
 func get_next_mesh_candidate() -> Vector2i:
-
-	# ---------------------------------------------------------------
-	# PLAYER EDIT
-	# ---------------------------------------------------------------
-
 	while not player_edit_queue.is_empty():
-
-		var player_coord: Vector2i = (
-			player_edit_queue.pop_front()
-		)
-
-		if not player_edit_queued.has(
-			player_coord
-		):
+		var player_coord := player_edit_queue.pop_front()
+		if not player_edit_queued.has(player_coord):
 			continue
-
-		player_edit_queued.erase(
-			player_coord
-		)
-
+		player_edit_queued.erase(player_coord)
 		active_mesh_priority = PRIORITY_PLAYER
-
 		return player_coord
 
-
-	# ---------------------------------------------------------------
-	# CRITICAL
-	# ---------------------------------------------------------------
-
-	while not critical_mesh_queue.is_empty():
-
-		var critical_coord: Vector2i = (
-			critical_mesh_queue.pop_front()
-		)
-
-		if not critical_mesh_queued.has(
-			critical_coord
-		):
-			continue
-
-		critical_mesh_queued.erase(
-			critical_coord
-		)
-
+	var critical := _take_best_mesh_candidate(
+		critical_mesh_queue,
+		critical_mesh_queued
+	)
+	if critical != INVALID_CHUNK:
 		active_mesh_priority = PRIORITY_NEAR
+		return critical
 
-		return critical_coord
-
-
-	# ---------------------------------------------------------------
-	# NEAR
-	# ---------------------------------------------------------------
-
-	while not near_mesh_queue.is_empty():
-
-		var near_coord: Vector2i = (
-			near_mesh_queue.pop_front()
-		)
-
-		if not near_mesh_queued.has(
-			near_coord
-		):
-			continue
-
-		near_mesh_queued.erase(
-			near_coord
-		)
-
+	var near := _take_best_mesh_candidate(
+		near_mesh_queue,
+		near_mesh_queued
+	)
+	if near != INVALID_CHUNK:
 		active_mesh_priority = PRIORITY_NEAR
+		return near
 
-		return near_coord
-
-
-	# ---------------------------------------------------------------
-	# FAR
-	# ---------------------------------------------------------------
-
-	while not far_mesh_queue.is_empty():
-
-		var far_coord: Vector2i = (
-			far_mesh_queue.pop_front()
-		)
-
-		if not far_mesh_queued.has(
-			far_coord
-		):
-			continue
-
-		far_mesh_queued.erase(
-			far_coord
-		)
-
+	var far := _take_best_mesh_candidate(
+		far_mesh_queue,
+		far_mesh_queued
+	)
+	if far != INVALID_CHUNK:
 		active_mesh_priority = PRIORITY_FAR
-
-		return far_coord
-
+		return far
 
 	return INVALID_CHUNK
 
@@ -2337,8 +2393,9 @@ func update_collision_range() -> void:
 func process_collision_queue() -> void:
 
 	var collisions_done: int = 0
+	var collision_limit := _collision_work_limit()
 
-	while collisions_done < collisions_per_frame:
+	while collisions_done < collision_limit:
 
 		if collision_queue.is_empty():
 			return
@@ -2372,7 +2429,12 @@ func process_collision_queue() -> void:
 		if chunk.collision_ready:
 			continue
 
+		var collision_start_usec := Time.get_ticks_usec()
 		chunk.build_collision()
+		generation_profiler.record(
+			"collision",
+			float(Time.get_ticks_usec() - collision_start_usec) / 1000.0
+		)
 
 		collisions_done += 1
 
@@ -2740,6 +2802,8 @@ func try_spawn_player() -> void:
 		)
 
 	player.velocity = Vector3.ZERO
+	stream_direction = Vector2.ZERO
+	stream_speed = 0.0
 
 	player_spawned = true
 
@@ -2748,6 +2812,12 @@ func try_spawn_player() -> void:
 	last_player_position = player.global_position
 	statistics_initialized = true
 	player.enable_controls()
+
+	generation_profiler.record(
+		"world_loading",
+		generation_profiler.get_elapsed_ms()
+	)
+	print(generation_profiler.get_summary())
 
 	loading_screen.finish()
 
