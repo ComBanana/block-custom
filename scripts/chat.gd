@@ -9,6 +9,7 @@ const COMMAND_MANAGER = preload("res://scripts/command_manager.gd")
 
 
 @onready var player: CharacterBody3D = $"../../Player"
+@onready var world: Node = $"../../World"
 @onready var messages_container: VBoxContainer = $Messages
 @onready var chat_history_panel: PanelContainer = $ChatHistoryPanel
 @onready var history_scroll: ScrollContainer = $ChatHistoryPanel/Scroll
@@ -27,6 +28,7 @@ var command_manager: RefCounted
 
 func _ready() -> void:
 	command_manager = COMMAND_MANAGER.new()
+	world.teleport_completed.connect(_on_teleport_completed)
 	visible = true
 	chat_history_panel.visible = false
 	messages_container.visible = true
@@ -142,6 +144,14 @@ func _on_chat_input_submitted(message: String) -> void:
 		_rebuild_full_history()
 
 	_close_chat()
+
+
+func _on_teleport_completed(message: String) -> void:
+	chat_log.append(message)
+	_add_recent_message(message)
+
+	if chat_open:
+		_rebuild_full_history()
 
 
 func _set_input_history(direction: int) -> void:
