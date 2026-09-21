@@ -72,6 +72,17 @@ max_length = 16
 placeholder_text = "Player"
 alignment = 1
 
+[node name="SaveButton" type="Button" parent="UsernamePanel/VBox"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+text = "Save"
+
+[node name="SavedLabel" type="Label" parent="UsernamePanel/VBox"]
+layout_mode = 2
+text = "Saved"
+horizontal_alignment = 1
+visible = false
+
 [node name="ErrorLabel" type="Label" parent="UsernamePanel/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.4, 0.35, 1)
@@ -314,6 +325,7 @@ text = "Back"
 [connection signal="pressed" from="Center/MainPanel/VBox/CreateButton" to="." method="_on_create_pressed"]
 [connection signal="pressed" from="Center/MainPanel/VBox/SettingsButton" to="." method="_on_settings_pressed"]
 [connection signal="pressed" from="Center/MainPanel/VBox/QuitButton" to="." method="_on_quit_pressed"]
+[connection signal="pressed" from="UsernamePanel/VBox/SaveButton" to="." method="_on_username_save_pressed"]
 [connection signal="pressed" from="Center/WorldsPanel/VBox/Buttons/PlayButton" to="." method="_on_play_world_pressed"]
 [connection signal="pressed" from="Center/WorldsPanel/VBox/Buttons/DeleteButton" to="." method="_on_delete_world_pressed"]
 [connection signal="pressed" from="Center/WorldsPanel/VBox/BackButton" to="." method="_on_back_pressed"]
@@ -325,5 +337,3 @@ text = "Back"
 [connection signal="value_changed" from="Center/SettingsPanel/VBox/FOVSlider" to="." method="_on_fov_changed"]
 [connection signal="item_selected" from="Center/SettingsPanel/VBox/WindowModeRow/WindowModeOption" to="." method="_on_window_mode_changed"]
 [connection signal="pressed" from="Center/SettingsPanel/VBox/BackButton" to="." method="_on_back_pressed"]
-[connection signal="text_submitted" from="UsernamePanel/VBox/UsernameInput" to="." method="_on_username_submitted"]
-[connection signal="focus_exited" from="UsernamePanel/VBox/UsernameInput" to="." method="_on_username_focus_exited"]
