@@ -82,13 +82,15 @@ const GENERATION_PROFILER := preload(
 	"res://scripts/generation_profiler.gd"
 )
 
-const GRASS_TEXTURE := preload("res://textures/grass.png")
+const GRASS_SIDE_TEXTURE := preload("res://textures/grass-side.png")
+const GRASS_TOP_TEXTURE := preload("res://textures/grass-top.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
 const SAND_TEXTURE := preload("res://textures/sand.png")
 const WATER_TEXTURE := preload("res://textures/water.png")
 
-var grass_material: StandardMaterial3D
+var grass_side_material: StandardMaterial3D
+var grass_top_material: StandardMaterial3D
 var dirt_material: StandardMaterial3D
 var stone_material: StandardMaterial3D
 var sand_material: StandardMaterial3D
@@ -1009,9 +1011,13 @@ func _smoothstep(value: float) -> float:
 
 
 func _create_shared_materials() -> void:
-	grass_material = StandardMaterial3D.new()
-	grass_material.albedo_texture = GRASS_TEXTURE
-	grass_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	grass_side_material = StandardMaterial3D.new()
+	grass_side_material.albedo_texture = GRASS_SIDE_TEXTURE
+	grass_side_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	grass_top_material = StandardMaterial3D.new()
+	grass_top_material.albedo_texture = GRASS_TOP_TEXTURE
+	grass_top_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
 	dirt_material = StandardMaterial3D.new()
 	dirt_material.albedo_texture = DIRT_TEXTURE
@@ -1671,7 +1677,8 @@ func load_chunk(
 
 	# Share the same materials across every chunk. This avoids
 	# creating five new StandardMaterial3D resources per chunk.
-	chunk.grass_material = grass_material
+	chunk.grass_side_material = grass_side_material
+	chunk.grass_top_material = grass_top_material
 	chunk.dirt_material = dirt_material
 	chunk.stone_material = stone_material
 	chunk.sand_material = sand_material
