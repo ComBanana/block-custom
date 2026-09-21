@@ -3,6 +3,7 @@ extends Node3D
 
 const CHUNK_SIZE: int = 16
 const CHUNK_HEIGHT: int = 256
+const LEGACY_CHUNK_HEIGHTS: Array[int] = [64, 16]
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -1615,6 +1616,37 @@ func process_load_queue() -> void:
 		loads_done += 1
 
 
+func _migrate_saved_chunk_data(
+	saved_blocks: PackedByteArray,
+	expected_size: int
+) -> PackedByteArray:
+	if saved_blocks.size() == expected_size:
+		return saved_blocks
+
+	for legacy_height in LEGACY_CHUNK_HEIGHTS:
+		var legacy_size: int = (
+			CHUNK_SIZE *
+			legacy_height *
+			CHUNK_SIZE
+		)
+
+		if saved_blocks.size() != legacy_size:
+			continue
+
+		# Chunk storage is Y-contiguous, so the legacy data is the
+		# exact prefix of the current buffer. The old formats ended
+		# at their height ceiling, so the added upper area is air.
+		var expanded := PackedByteArray()
+		expanded.resize(expected_size)
+
+		for index in range(saved_blocks.size()):
+			expanded[index] = saved_blocks[index]
+
+		return expanded
+
+	return PackedByteArray()
+
+
 func load_chunk(
 	chunk_coord: Vector2i
 ) -> void:
@@ -1655,8 +1687,23 @@ func load_chunk(
 		chunk_coord
 	)
 
-	if saved_blocks.size() == expected_size:
-		chunk.apply_generated_data(saved_blocks)
+	var migrated_blocks := _migrate_saved_chunk_data(
+		saved_blocks,
+		expected_size
+	)
+
+	if not migrated_blocks.is_empty():
+		var was_legacy_format: bool = (
+			saved_blocks.size() != expected_size
+		)
+
+		chunk.apply_generated_data(migrated_blocks)
+
+		# Persist the upgraded representation on the next world save.
+		# This keeps old edits while avoiding repeated migration work.
+		if was_legacy_format:
+			dirty_chunks[chunk_coord] = true
+
 		enqueue_mesh_chunk(chunk_coord)
 		enqueue_neighbor_meshes(chunk_coord)
 		return
@@ -2473,6 +2520,14 @@ func unload_chunk(
 	)
 
 	generation_queued.erase(
+		chunk_coord
+	)
+
+	critical_generation_queued.erase(
+		chunk_coord
+	)
+
+	critical_mesh_queued.erase(
 		chunk_coord
 	)
 
