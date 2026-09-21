@@ -53,6 +53,7 @@ var render_distance: int = 12
 var fullscreen: bool = false
 var fog_enabled: bool = true
 var view_bobbing: bool = true
+var light_shaders_enabled: bool = true
 var toggle_sprint: bool = false
 var toggle_crouch: bool = false
 var username: String = "Player"
@@ -112,6 +113,9 @@ func load_from_disk() -> void:
 	view_bobbing = bool(
 		config.get_value("video", "view_bobbing", view_bobbing)
 	)
+	light_shaders_enabled = bool(
+		config.get_value("video", "light_shaders_enabled", light_shaders_enabled)
+	)
 	toggle_sprint = bool(
 		config.get_value(
 			"controls",
@@ -150,6 +154,7 @@ func save_to_disk() -> void:
 	config.set_value("video", "fullscreen", fullscreen)
 	config.set_value("video", "fog_enabled", fog_enabled)
 	config.set_value("video", "view_bobbing", view_bobbing)
+	config.set_value("video", "light_shaders_enabled", light_shaders_enabled)
 	config.set_value("controls", "toggle_sprint", toggle_sprint)
 	config.set_value("controls", "toggle_crouch", toggle_crouch)
 	config.set_value("player", "username", username)
@@ -202,6 +207,11 @@ func set_fog_enabled(enabled: bool) -> void:
 
 func set_view_bobbing(enabled: bool) -> void:
 	view_bobbing = enabled
+	save_to_disk()
+
+
+func set_light_shaders_enabled(enabled: bool) -> void:
+	light_shaders_enabled = enabled
 	save_to_disk()
 
 
