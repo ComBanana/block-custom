@@ -674,6 +674,7 @@ func _apply_fog_settings() -> void:
 
 	var environment: Environment = world_environment.environment
 	environment.fog_enabled = GameSettings.fog_enabled
+	environment.fog_mode = Environment.FOG_MODE_DEPTH
 
 	var view_distance := float(render_distance * CHUNK_SIZE)
 	var fog_begin := maxf(
