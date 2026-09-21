@@ -30,7 +30,7 @@ extends Control
 @onready var keybinds_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/KeybindsButton
 const KEYBINDS_DIALOG_SCENE = preload("res://scenes/KeybindsDialog.tscn")
 
-@onready var version_label: Label = $VersionLabel
+var version_label: Label
 @onready var username_panel: Control = $UsernamePanel
 @onready var username_input: LineEdit = $UsernamePanel/VBox/UsernameInput
 @onready var username_save_button: Button = $UsernamePanel/VBox/SaveButton
@@ -43,10 +43,12 @@ var legacy_migration_dialog: ConfirmationDialog
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	version_label.text = "v%s" % ProjectSettings.get_setting(
-		"application/config/version",
-		"0.1.1"
-	)
+	version_label = get_node_or_null("VersionLabel") as Label
+	if version_label != null:
+		version_label.text = "v%s" % ProjectSettings.get_setting(
+			"application/config/version",
+			"0.1.1"
+		)
 	video_button.pressed.connect(_on_video_tab_pressed)
 	controls_button.pressed.connect(_on_controls_tab_pressed)
 	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
