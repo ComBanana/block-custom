@@ -161,6 +161,29 @@ grow_vertical = 0
 alignment = 2
 theme_override_constants/separation = 2
 
+
+[node name="ChatHistoryPanel" type="PanelContainer" parent="HUD/Chat"]
+visible = false
+layout_mode = 0
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -500.0
+offset_right = 650.0
+offset_bottom = -110.0
+grow_vertical = 0
+
+[node name="Scroll" type="ScrollContainer" parent="HUD/Chat/ChatHistoryPanel"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="HistoryMessages" type="VBoxContainer" parent="HUD/Chat/ChatHistoryPanel/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
 [node name="ChatInputPanel" type="PanelContainer" parent="HUD/Chat"]
 visible = false
 layout_mode = 0
