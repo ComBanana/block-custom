@@ -254,29 +254,50 @@ func _set_swim_crawl_pose() -> void:
 
 
 func _can_stand_up() -> bool:
-	var query := PhysicsShapeQueryParameters3D.new()
+	# BlockCraft is a voxel world, so headroom is more reliable when
+	# checked against the actual block grid instead of querying the
+	# Jolt ConcavePolygonShape3D used by chunk collision.
+	if standing_shape == null:
+		return true
 
-	query.shape = standing_shape
+	var half_size: Vector3 = standing_shape.size * 0.5
 
-	query.transform = Transform3D(
-		global_transform.basis,
-		global_position
-		+ Vector3(
-			0.0,
-			STANDING_HEIGHT * 0.5,
-			0.0
-		)
-	)
+	# Use a tiny inset so a block that only touches the player's side,
+	# floor, or head boundary is not treated as overlapping.
+	const EPSILON: float = 0.001
 
-	query.collision_mask = collision_mask
-	query.exclude = [get_rid()]
+	var min_x: float = global_position.x - half_size.x + EPSILON
+	var max_x: float = global_position.x + half_size.x - EPSILON
+	var min_y: float = global_position.y + EPSILON
+	var max_y: float = global_position.y + standing_shape.size.y - EPSILON
+	var min_z: float = global_position.z - half_size.z + EPSILON
+	var max_z: float = global_position.z + half_size.z - EPSILON
 
-	var results := get_world_3d().direct_space_state.intersect_shape(
-		query,
-		1
-	)
+	if min_x > max_x or min_y > max_y or min_z > max_z:
+		return true
 
-	return results.is_empty()
+	var min_block_x: int = floori(min_x)
+	var max_block_x: int = floori(max_x)
+	var min_block_y: int = floori(min_y)
+	var max_block_y: int = floori(max_y)
+	var min_block_z: int = floori(min_z)
+	var max_block_z: int = floori(max_z)
+
+	for y in range(min_block_y, max_block_y + 1):
+		for x in range(min_block_x, max_block_x + 1):
+			for z in range(min_block_z, max_block_z + 1):
+				var block_id: int = world.get_block_world(
+					Vector3(
+						x + 0.5,
+						y + 0.5,
+						z + 0.5
+					)
+				)
+
+				if _is_solid_block(block_id):
+					return false
+
+	return true
 
 
 func _update_swim_crawl_state(
