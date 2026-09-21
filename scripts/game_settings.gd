@@ -5,6 +5,8 @@ const SETTINGS_PATH := "user://settings.cfg"
 var fov: float = 75.0
 var render_distance: int = 12
 var fullscreen: bool = false
+var toggle_sprint: bool = false
+var toggle_crouch: bool = false
 
 
 func _ready() -> void:
@@ -21,6 +23,8 @@ func load_from_disk() -> void:
 	fov = clampf(float(config.get_value("video", "fov", fov)), 20.0, 120.0)
 	render_distance = clampi(int(config.get_value("video", "render_distance", render_distance)), 2, 16)
 	fullscreen = bool(config.get_value("video", "fullscreen", fullscreen))
+	toggle_sprint = bool(config.get_value("controls", "toggle_sprint", toggle_sprint))
+	toggle_crouch = bool(config.get_value("controls", "toggle_crouch", toggle_crouch))
 
 
 func save_to_disk() -> void:
@@ -28,6 +32,8 @@ func save_to_disk() -> void:
 	config.set_value("video", "fov", fov)
 	config.set_value("video", "render_distance", render_distance)
 	config.set_value("video", "fullscreen", fullscreen)
+	config.set_value("controls", "toggle_sprint", toggle_sprint)
+	config.set_value("controls", "toggle_crouch", toggle_crouch)
 	config.save(SETTINGS_PATH)
 
 
@@ -51,4 +57,14 @@ func set_render_distance(value: int) -> void:
 func set_fullscreen(enabled: bool) -> void:
 	fullscreen = enabled
 	apply_window_mode()
+	save_to_disk()
+
+
+func set_toggle_sprint(enabled: bool) -> void:
+	toggle_sprint = enabled
+	save_to_disk()
+
+
+func set_toggle_crouch(enabled: bool) -> void:
+	toggle_crouch = enabled
 	save_to_disk()
