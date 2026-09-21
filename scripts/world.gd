@@ -1261,8 +1261,10 @@ func process_generation_queue() -> void:
 			generated_data
 		)
 
-		enqueue_water_updates_for_chunk(chunk_coord)
-
+		# Generated terrain water is already filled to the world water
+		# level. Do not enqueue every water source for simulation here;
+		# that creates a large backlog as new chunks are explored.
+		# Water will still be scheduled by actual block changes.
 		enqueue_mesh_chunk(
 			chunk_coord
 		)
