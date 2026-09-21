@@ -3,8 +3,8 @@ extends Control
 
 const MAX_VISIBLE_MESSAGES := 10
 const MAX_HISTORY := 50
-const MESSAGE_LIFETIME := 10.0
-const MESSAGE_FADE_TIME := 2.0
+const MESSAGE_LIFETIME := 5.0
+const MESSAGE_FADE_TIME := 1.5
 
 
 @onready var messages_container: VBoxContainer = $Messages
@@ -19,7 +19,7 @@ var messages: Array[Dictionary] = []
 
 
 func _ready() -> void:
-	visible = false
+	visible = true
 	chat_input_panel.visible = false
 	chat_input.gui_input.connect(_on_chat_input_gui_input)
 
@@ -55,7 +55,6 @@ func _open_chat() -> void:
 
 func _close_chat() -> void:
 	chat_open = false
-	visible = false
 	chat_input_panel.visible = false
 	chat_input.release_focus()
 	chat_input.text = ""
