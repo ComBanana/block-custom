@@ -33,7 +33,8 @@ enum GenerationStage {
 }
 
 
-const GRASS_TEXTURE := preload("res://textures/grass.png")
+const GRASS_SIDE_TEXTURE := preload("res://textures/grass-side.png")
+const GRASS_TOP_TEXTURE := preload("res://textures/grass-top.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
 const SAND_TEXTURE := preload("res://textures/sand.png")
@@ -60,7 +61,8 @@ var mesh_building: bool = false
 var terrain_x: int = 0
 var mesh_x: int = 0
 
-var grass_material: StandardMaterial3D
+var grass_side_material: StandardMaterial3D
+var grass_top_material: StandardMaterial3D
 var dirt_material: StandardMaterial3D
 var stone_material: StandardMaterial3D
 var sand_material: StandardMaterial3D
@@ -81,10 +83,15 @@ func is_generation_stage_at_least(stage: GenerationStage) -> bool:
 func _ready() -> void:
 	# World assigns shared materials before this node enters the tree.
 	# The fallback creation keeps Chunk.tscn safe to instantiate by itself.
-	if grass_material == null:
-		grass_material = StandardMaterial3D.new()
-		grass_material.albedo_texture = GRASS_TEXTURE
-		grass_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	if grass_side_material == null:
+		grass_side_material = StandardMaterial3D.new()
+		grass_side_material.albedo_texture = GRASS_SIDE_TEXTURE
+		grass_side_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+	if grass_top_material == null:
+		grass_top_material = StandardMaterial3D.new()
+		grass_top_material.albedo_texture = GRASS_TOP_TEXTURE
+		grass_top_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 
 	if dirt_material == null:
 		dirt_material = StandardMaterial3D.new()
@@ -533,8 +540,13 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 
 	_add_mesh_surface(
 		solid_mesh,
-		grass_material,
-		buffer.grass
+		grass_top_material,
+		buffer.grass_top
+	)
+	_add_mesh_surface(
+		solid_mesh,
+		grass_side_material,
+		buffer.grass_side
 	)
 	_add_mesh_surface(
 		solid_mesh,
