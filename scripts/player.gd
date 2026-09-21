@@ -329,7 +329,9 @@ func _update_swim_crawl_state(
 	var want_crouch: bool = _is_crouch_active() and not in_water
 
 	if swimming_mode:
-		if in_water and moving_forward:
+		# Swimming is sprint-driven. Turning sprint off must immediately
+		# leave swimming mode, regardless of whether sprint is held or toggled.
+		if in_water and head_in_water and moving_forward and sprinting:
 			_set_swim_crawl_pose()
 			return
 
