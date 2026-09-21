@@ -467,7 +467,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			deg_to_rad(89.0)
 		)
 
-	if event is InputEventKey and event.pressed and not event.echo:
+	if event.is_pressed() and not event.is_echo():
 		for slot in range(1, 10):
 			if event.is_action_pressed("hotbar_%d" % slot):
 				match slot:
