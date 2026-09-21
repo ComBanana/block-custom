@@ -449,12 +449,13 @@ func is_in_water() -> bool:
 	)
 
 	# Sample several points up the player's body rather than selecting
-	# one voxel from the feet. This lets swimming remain active while
-	# the player rises through water, while the lowest sample is still
-	# high enough above the feet that water below a supporting block
-	# does not trigger water movement.
+	# one voxel from the feet. The lowest sample is 0.125 blocks above
+	# the feet, which is safely above a water surface that is exactly
+	# one pixel (1/16 block) below the top of a supporting block.
+	# Higher samples keep swimming active while the player rises
+	# through the water.
 	var sample_heights := [
-		0.05,
+		0.125,
 		height * 0.25,
 		height * 0.5,
 		minf(height * 0.75, height - 0.05)
