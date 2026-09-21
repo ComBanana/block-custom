@@ -602,24 +602,30 @@ func _constrain_crouch_movement(
 	direction: Vector3,
 	distance: float
 ) -> Vector3:
-	if direction.length_squared() <= 0.000001:
+	if direction.length_squared() <= 0.000001 or distance <= 0.0:
 		return Vector3.ZERO
 
-	if distance <= 0.0:
-		return direction
-
-	# Minecraft's edge protection operates on the actual horizontal
-	# movement components in three passes: X, Z, then X+Z together.
-	# The diagonal pass is important because checking the axes separately
-	# can otherwise allow a diagonal move to leave the supporting block.
+	# This is applied to the actual movement being attempted this frame,
+	# not just the desired input direction. That prevents leftover ground
+	# velocity from carrying the player off an edge after the input changes.
 	const EDGE_BACKOFF_STEP: float = 0.05
 
-	var normalized_direction: Vector3 = direction.normalized()
-	var adjusted_x: float = normalized_direction.x * distance
-	var adjusted_z: float = normalized_direction.z * distance
+	var movement := Vector3(
+		direction.x,
+		0.0,
+		direction.z
+	)
 
-	# Pass 1: back off movement along X while the lowered hitbox has no
-	# support underneath it.
+	if movement.length_squared() <= 0.000001:
+		return Vector3.ZERO
+
+	var movement_length: float = movement.length()
+	var movement_direction: Vector3 = movement / movement_length
+
+	var adjusted_x: float = movement_direction.x * distance
+	var adjusted_z: float = movement_direction.z * distance
+
+	# Match Minecraft's X pass.
 	while (
 		adjusted_x != 0.0
 		and not _has_crouch_support_at(
@@ -627,12 +633,14 @@ func _constrain_crouch_movement(
 			+ Vector3(adjusted_x, 0.0, 0.0)
 		)
 	):
-		if absf(adjusted_x) <= EDGE_BACKOFF_STEP:
+		if absf(adjusted_x) < EDGE_BACKOFF_STEP:
 			adjusted_x = 0.0
+		elif adjusted_x > 0.0:
+			adjusted_x -= EDGE_BACKOFF_STEP
 		else:
-			adjusted_x -= signf(adjusted_x) * EDGE_BACKOFF_STEP
+			adjusted_x += EDGE_BACKOFF_STEP
 
-	# Pass 2: do the same independently along Z.
+	# Match Minecraft's Z pass.
 	while (
 		adjusted_z != 0.0
 		and not _has_crouch_support_at(
@@ -640,48 +648,64 @@ func _constrain_crouch_movement(
 			+ Vector3(0.0, 0.0, adjusted_z)
 		)
 	):
-		if absf(adjusted_z) <= EDGE_BACKOFF_STEP:
+		if absf(adjusted_z) < EDGE_BACKOFF_STEP:
 			adjusted_z = 0.0
+		elif adjusted_z > 0.0:
+			adjusted_z -= EDGE_BACKOFF_STEP
 		else:
-			adjusted_z -= signf(adjusted_z) * EDGE_BACKOFF_STEP
+			adjusted_z += EDGE_BACKOFF_STEP
 
-	# Pass 3: check the remaining diagonal movement as a whole.
-	# This is the part our previous implementation was missing.
+	# Match Minecraft's combined X+Z pass.
 	while (
 		adjusted_x != 0.0
 		and adjusted_z != 0.0
 		and not _has_crouch_support_at(
 			global_position
-			+ Vector3(
-				adjusted_x,
-				0.0,
-				adjusted_z
-			)
+			+ Vector3(adjusted_x, 0.0, adjusted_z)
 		)
 	):
-		if absf(adjusted_x) <= EDGE_BACKOFF_STEP:
+		if absf(adjusted_x) < EDGE_BACKOFF_STEP:
 			adjusted_x = 0.0
+		elif adjusted_x > 0.0:
+			adjusted_x -= EDGE_BACKOFF_STEP
 		else:
-			adjusted_x -= signf(adjusted_x) * EDGE_BACKOFF_STEP
+			adjusted_x += EDGE_BACKOFF_STEP
 
-		if absf(adjusted_z) <= EDGE_BACKOFF_STEP:
+		if absf(adjusted_z) < EDGE_BACKOFF_STEP:
 			adjusted_z = 0.0
+		elif adjusted_z > 0.0:
+			adjusted_z -= EDGE_BACKOFF_STEP
 		else:
-			adjusted_z -= signf(adjusted_z) * EDGE_BACKOFF_STEP
+			adjusted_z += EDGE_BACKOFF_STEP
 
-	if (
-		absf(adjusted_x) <= 0.000001
-		and absf(adjusted_z) <= 0.000001
-	):
-		return Vector3.ZERO
-
-	# Convert the remaining allowed movement back into the normalized
-	# movement scale expected by the acceleration code.
 	return Vector3(
-		adjusted_x / distance,
+		adjusted_x,
 		0.0,
-		adjusted_z / distance
+		adjusted_z
+	) / distance
+
+
+func _constrain_crouch_velocity(delta: float) -> void:
+	if delta <= 0.0:
+		return
+
+	var horizontal_velocity := Vector3(
+		velocity.x,
+		0.0,
+		velocity.z
 	)
+
+	if horizontal_velocity.length_squared() <= 0.000001:
+		return
+
+	var allowed := _constrain_crouch_movement(
+		horizontal_velocity,
+		delta
+	)
+
+	velocity.x *= allowed.x
+	velocity.z *= allowed.z
+
 
 func _submerged_depth() -> float:
 	var depth := 0.0
@@ -973,19 +997,8 @@ func _physics_process(delta: float) -> void:
 		elif is_crouching:
 			current_speed = crouch_speed
 
-		var movement_direction: Vector3 = direction
-
-		if (
-			grounded_for_jump
-			and (is_crouching or crawling_mode)
-		):
-			movement_direction = _constrain_crouch_movement(
-				direction,
-				current_speed * delta
-			)
-
 		var target_velocity := (
-			movement_direction * current_speed
+			direction * current_speed
 		)
 
 		if grounded_for_jump:
@@ -1032,6 +1045,20 @@ func _physics_process(delta: float) -> void:
 				air_acceleration * delta
 			)
 
+
+	# ---------------------------------------------------------------
+	# Crouch edge protection
+	# ---------------------------------------------------------------
+
+	# Constrain the actual horizontal velocity immediately before
+	# move_and_slide(). This prevents momentum from carrying the player
+	# past the edge after the desired direction changes.
+	if (
+		grounded_for_jump
+		and (is_crouching or crawling_mode)
+		and not swimming
+	):
+		_constrain_crouch_velocity(delta)
 
 	# ---------------------------------------------------------------
 	# Move
