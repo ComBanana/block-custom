@@ -1,4 +1,5 @@
 extends Node3D
+class_name Chunk
 
 const CHUNK_SIZE: int = 16
 const CHUNK_HEIGHT: int = 256
