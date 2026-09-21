@@ -768,6 +768,7 @@ func _create_celestial_visual(
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_UNSHADED
 	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.disable_fog = true
 	material.albedo_color = color
 	material.emission_enabled = true
 	material.emission = emission_color
@@ -781,7 +782,7 @@ func _create_celestial_visual(
 
 func _update_day_night(delta: float) -> void:
 	world_time_minutes = fmod(
-		world_time_minutes + delta * 60.0 / 60.0,
+		world_time_minutes + delta,
 		1440.0
 	)
 
