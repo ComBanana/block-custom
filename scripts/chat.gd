@@ -19,10 +19,9 @@ var messages: Array[Dictionary] = []
 
 
 func _ready() -> void:
-	visible = true
+	visible = false
 	chat_input_panel.visible = false
 	chat_input.gui_input.connect(_on_chat_input_gui_input)
-	chat_input.text_submitted.connect(_on_chat_input_submitted)
 
 
 func _process(_delta: float) -> void:
@@ -41,6 +40,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _open_chat() -> void:
 	chat_open = true
+	visible = true
 	chat_input_panel.visible = true
 	chat_input.text = ""
 	history_index = -1
@@ -55,6 +55,7 @@ func _open_chat() -> void:
 
 func _close_chat() -> void:
 	chat_open = false
+	visible = false
 	chat_input_panel.visible = false
 	chat_input.release_focus()
 	chat_input.text = ""
