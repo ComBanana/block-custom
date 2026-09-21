@@ -441,73 +441,43 @@ func _is_solid_block(block_id: int) -> bool:
 	return block_id != AIR and not _is_water_block(block_id)
 
 
-func _water_overlaps_vertical_range(
-	block_y: int,
-	block_id: int,
-	min_y: float,
-	max_y: float
-) -> bool:
-	if not _is_water_block(block_id):
-		return false
-
-	var water_bottom: float = float(block_y)
-	var water_top: float = (
-		water_bottom + ChunkMesher.water_height(block_id)
-	)
-
-	# Ignore tiny numerical contact. The player must actually overlap
-	# the rendered fluid volume.
-	const EPSILON: float = 0.005
-
-	return (
-		max_y > water_bottom + EPSILON
-		and min_y < water_top - EPSILON
-	)
-
-
 func is_in_water() -> bool:
-	if collision_shape == null or not collision_shape.shape is BoxShape3D:
-		return false
-
-	var box: BoxShape3D = collision_shape.shape
-	var half_size: Vector3 = box.size * 0.5
-	var center: Vector3 = collision_shape.global_position
-
-	var min_y: float = center.y - half_size.y
-	var max_y: float = center.y + half_size.y
-
-	# For body-fluid detection, use the voxel containing the player's
-	# feet rather than the middle of the hitbox. This is important at
-	# block edges: water in the neighboring lower voxel can have its
-	# surface below the player's feet and must not trigger water physics.
-	# At the same time, water occupying the voxel above the seafloor is
-	# still detected normally.
-	var block_y: int = floori(min_y)
-	var block_id: int = world.get_block_world(
-		Vector3(
-			center.x,
-			float(block_y) + 0.5,
-			center.z
-		)
+	var height: float = (
+		collision_shape.shape.size.y
+		if collision_shape.shape is BoxShape3D
+		else STANDING_HEIGHT
 	)
 
-	return _water_overlaps_vertical_range(
-		block_y,
-		block_id,
-		min_y,
-		max_y
-	)
+	# Sample several points up the player's body rather than selecting
+	# one voxel from the feet. This lets swimming remain active while
+	# the player rises through water, while the lowest sample is still
+	# high enough above the feet that water below a supporting block
+	# does not trigger water movement.
+	var sample_heights := [
+		0.05,
+		height * 0.25,
+		height * 0.5,
+		minf(height * 0.75, height - 0.05)
+	]
+
+	for sample_height in sample_heights:
+		if _is_water_block(
+			world.get_block_world(
+				global_position + Vector3(
+					0.0,
+					sample_height,
+					0.0
+				)
+			)
+		):
+			return true
+
+	return false
+
 
 func is_head_in_water() -> bool:
-	var head_position: Vector3 = camera.global_position
-	var block_y: int = floori(head_position.y)
-	var block_id: int = world.get_block_world(head_position)
-
-	return _water_overlaps_vertical_range(
-		block_y,
-		block_id,
-		head_position.y,
-		head_position.y + 0.0001
+	return _is_water_block(
+		world.get_block_world(camera.global_position)
 	)
 
 
@@ -540,7 +510,7 @@ func _is_shallow_water_for_ground_jump() -> bool:
 		return false
 	if _submerged_depth() > water_fluid_jump_threshold:
 		return false
-	return is_on_floor() and _solid_below_feet()
+	return is_on_floor()
 
 
 func _can_water_shore_jump(direction: Vector3) -> bool:
@@ -730,7 +700,10 @@ func _physics_process(delta: float) -> void:
 	# entity velocity in blocks/tick. This fractional-tick update
 	# preserves Minecraft's 20 TPS recurrence at arbitrary FPS.
 	var tick_scale: float = delta * 20.0
-	var grounded_for_jump: bool = is_on_floor() and _solid_below_feet()
+	# is_on_floor() uses the actual collision contacts, so standing on the
+	# edge of a block still counts as grounded. A center-voxel lookup can
+	# miss that support and incorrectly disable jumping.
+	var grounded_for_jump: bool = is_on_floor()
 
 	var shallow_water_ground_jump: bool = (
 		grounded_for_jump
