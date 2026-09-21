@@ -13,11 +13,18 @@ extends Control
 @onready var seed_input: LineEdit = $Center/CreatePanel/VBox/SeedInput
 @onready var create_error: Label = $Center/CreatePanel/VBox/ErrorLabel
 
-@onready var render_distance_slider: HSlider = $Center/SettingsPanel/VBox/RenderDistanceSlider
-@onready var render_distance_value: Label = $Center/SettingsPanel/VBox/RenderDistanceRow/Value
-@onready var fov_slider: HSlider = $Center/SettingsPanel/VBox/FOVSlider
-@onready var fov_value: Label = $Center/SettingsPanel/VBox/FOVRow/Value
-@onready var window_mode_option: OptionButton = $Center/SettingsPanel/VBox/WindowModeRow/WindowModeOption
+@onready var video_button: Button = $Center/SettingsPanel/VBox/CategoryButtons/VideoButton
+@onready var controls_button: Button = $Center/SettingsPanel/VBox/CategoryButtons/ControlsButton
+@onready var video_options: Control = $Center/SettingsPanel/VBox/VideoOptions
+@onready var controls_options: Control = $Center/SettingsPanel/VBox/ControlsOptions
+
+@onready var render_distance_slider: HSlider = $Center/SettingsPanel/VBox/VideoOptions/RenderDistanceSlider
+@onready var render_distance_value: Label = $Center/SettingsPanel/VBox/VideoOptions/RenderDistanceRow/Value
+@onready var fov_slider: HSlider = $Center/SettingsPanel/VBox/VideoOptions/FOVSlider
+@onready var fov_value: Label = $Center/SettingsPanel/VBox/VideoOptions/FOVRow/Value
+@onready var window_mode_option: OptionButton = $Center/SettingsPanel/VBox/VideoOptions/WindowModeRow/WindowModeOption
+@onready var toggle_sprint_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleSprintButton
+@onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
 
 var worlds: Array[Dictionary] = []
 var legacy_migration_dialog: ConfirmationDialog
@@ -25,6 +32,10 @@ var legacy_migration_dialog: ConfirmationDialog
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	video_button.pressed.connect(_on_video_tab_pressed)
+	controls_button.pressed.connect(_on_controls_tab_pressed)
+	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
+	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
 	get_tree().paused = false
 	_show_panel(main_panel)
 
@@ -56,7 +67,35 @@ func _on_create_pressed() -> void:
 
 func _on_settings_pressed() -> void:
 	_load_settings_ui()
+	_show_settings_tab("video")
 	_show_panel(settings_panel)
+
+func _show_settings_tab(tab: String) -> void:
+	var show_video: bool = tab == "video"
+	video_options.visible = show_video
+	controls_options.visible = not show_video
+
+func _on_video_tab_pressed() -> void:
+	_show_settings_tab("video")
+
+func _on_controls_tab_pressed() -> void:
+	_show_settings_tab("controls")
+
+func _on_toggle_sprint_pressed() -> void:
+	GameSettings.set_toggle_sprint(not GameSettings.toggle_sprint)
+	_update_toggle_buttons()
+
+func _on_toggle_crouch_pressed() -> void:
+	GameSettings.set_toggle_crouch(not GameSettings.toggle_crouch)
+	_update_toggle_buttons()
+
+func _update_toggle_buttons() -> void:
+	toggle_sprint_button.text = "Toggle Sprint: %s" % (
+		"ON" if GameSettings.toggle_sprint else "OFF"
+	)
+	toggle_crouch_button.text = "Toggle Crouch: %s" % (
+		"ON" if GameSettings.toggle_crouch else "OFF"
+	)
 
 
 func _on_quit_pressed() -> void:
@@ -150,6 +189,7 @@ func _load_settings_ui() -> void:
 	fov_slider.value = GameSettings.fov
 	fov_value.text = "%d°" % roundi(GameSettings.fov)
 	window_mode_option.select(1 if GameSettings.fullscreen else 0)
+	_update_toggle_buttons()
 
 
 func _on_render_distance_changed(value: float) -> void:
