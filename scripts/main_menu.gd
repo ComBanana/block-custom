@@ -25,6 +25,7 @@ extends Control
 @onready var window_mode_option: OptionButton = $Center/SettingsPanel/VBox/VideoOptions/WindowModeRow/WindowModeOption
 @onready var fog_button: Button = $Center/SettingsPanel/VBox/VideoOptions/FogButton
 @onready var view_bobbing_button: Button = $Center/SettingsPanel/VBox/VideoOptions/ViewBobbingButton
+@onready var light_shaders_button: Button = $Center/SettingsPanel/VBox/VideoOptions/LightShadersButton
 @onready var toggle_sprint_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleSprintButton
 @onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
 @onready var keybinds_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/KeybindsButton
@@ -55,6 +56,7 @@ func _ready() -> void:
 	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
 	fog_button.pressed.connect(_on_fog_pressed)
 	view_bobbing_button.pressed.connect(_on_view_bobbing_pressed)
+	light_shaders_button.pressed.connect(_on_light_shaders_pressed)
 	keybinds_button.pressed.connect(_on_keybinds_pressed)
 	username_save_button.pressed.connect(_on_username_save_pressed)
 	get_tree().paused = false
@@ -119,6 +121,10 @@ func _on_view_bobbing_pressed() -> void:
 	GameSettings.set_view_bobbing(not GameSettings.view_bobbing)
 	_update_video_toggle_buttons()
 
+func _on_light_shaders_pressed() -> void:
+	GameSettings.set_light_shaders_enabled(not GameSettings.light_shaders_enabled)
+	_update_video_toggle_buttons()
+
 func _on_keybinds_pressed() -> void:
 	var dialog = KEYBINDS_DIALOG_SCENE.instantiate()
 	add_child(dialog)
@@ -126,6 +132,7 @@ func _on_keybinds_pressed() -> void:
 func _update_video_toggle_buttons() -> void:
 	fog_button.text = "Fog: %s" % ("ON" if GameSettings.fog_enabled else "OFF")
 	view_bobbing_button.text = "View Bobbing: %s" % ("ON" if GameSettings.view_bobbing else "OFF")
+	light_shaders_button.text = "Light Shaders: %s" % ("ON" if GameSettings.light_shaders_enabled else "OFF")
 
 func _update_toggle_buttons() -> void:
 	toggle_sprint_button.text = "Toggle Sprint: %s" % (
