@@ -2,7 +2,7 @@ extends Node3D
 
 
 const CHUNK_SIZE: int = 16
-const CHUNK_HEIGHT: int = 64
+const CHUNK_HEIGHT: int = 256
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -522,19 +522,19 @@ func enqueue_water_updates_for_chunk(
 	if not chunk.is_generated:
 		return
 
-	const WATER_LEVEL: int = 10
+	const SEA_LEVEL: int = 50
 
 	for x in range(CHUNK_SIZE):
 		for z in range(CHUNK_SIZE):
 			if chunk.get_block(
 				x,
-				WATER_LEVEL,
+				SEA_LEVEL,
 				z
 			) == WATER:
 				_water_schedule(
 					Vector3i(
 						chunk_coord.x * CHUNK_SIZE + x,
-						WATER_LEVEL,
+						SEA_LEVEL,
 						chunk_coord.y * CHUNK_SIZE + z
 					)
 				)
