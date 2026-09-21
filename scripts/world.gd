@@ -26,6 +26,10 @@ const PRIORITY_NEAR: int = 1
 const PRIORITY_FAR: int = 2
 const TELEPORT_PRELOAD_RADIUS: int = 1
 
+const DAY_LENGTH_SECONDS: float = 24.0 * 60.0
+const DEFAULT_TIME_MINUTES: float = 720.0
+const CELESTIAL_ORBIT_RADIUS: float = 240.0
+
 
 @export_category("World")
 @export_range(2, 64, 1) var render_distance: int = 12
@@ -62,6 +66,7 @@ var mountain_shape_noise := FastNoiseLite.new()
 @onready var player: CharacterBody3D = $"../Player"
 @onready var loading_screen: Control = $"../LoadingLayer/LoadingScreen"
 @onready var world_environment: WorldEnvironment = $"../WorldEnvironment"
+@onready var sun_light: DirectionalLight3D = $"../Sun"
 
 var chunk_scene := preload("res://scenes/Chunk.tscn")
 
@@ -80,6 +85,12 @@ var dirt_material: StandardMaterial3D
 var stone_material: StandardMaterial3D
 var sand_material: StandardMaterial3D
 var water_material: StandardMaterial3D
+
+var moon_light: DirectionalLight3D
+var sun_visual: MeshInstance3D
+var moon_visual: MeshInstance3D
+var sky_material: ProceduralSkyMaterial
+var world_time_minutes: float = DEFAULT_TIME_MINUTES
 
 
 class GenerationResult:
@@ -605,6 +616,12 @@ func _ready() -> void:
 	play_time_seconds = float(
 		world_metadata.get("play_time_seconds", 0.0)
 	)
+	world_time_minutes = fmod(
+		float(world_metadata.get("world_time_minutes", DEFAULT_TIME_MINUTES)),
+		1440.0
+	)
+	if world_time_minutes < 0.0:
+		world_time_minutes += 1440.0
 
 	if world_metadata.has("player_x") and float(
 		world_metadata.get("player_y", -1.0)
@@ -656,7 +673,9 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	player.velocity = Vector3.ZERO
 
+	_create_celestial_bodies()
 	_apply_fog_settings()
+	_update_day_night(0.0)
 
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -697,6 +716,279 @@ func _apply_fog_settings() -> void:
 	environment.fog_depth_end = fog_end
 
 
+func _create_celestial_bodies() -> void:
+	var environment: Environment = world_environment.environment
+	if environment != null and environment.sky != null:
+		sky_material = environment.sky.sky_material as ProceduralSkyMaterial
+
+	if sun_light != null:
+		sun_light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+		sun_light.shadow_enabled = true
+
+	moon_light = DirectionalLight3D.new()
+	moon_light.name = "MoonLight"
+	moon_light.light_color = Color(
+		0.58,
+		0.70,
+		1.0,
+		1.0
+	)
+	moon_light.light_energy = 0.0
+	moon_light.shadow_enabled = false
+	moon_light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	add_child(moon_light)
+
+	sun_visual = _create_celestial_visual(
+		"SunVisual",
+		Color(1.0, 0.94, 0.68, 1.0),
+		Color(1.0, 0.88, 0.55, 1.0),
+		10.0
+	)
+	moon_visual = _create_celestial_visual(
+		"MoonVisual",
+		Color(0.72, 0.84, 1.0, 1.0),
+		Color(0.52, 0.70, 1.0, 1.0),
+		8.0
+	)
+
+
+func _create_celestial_visual(
+	node_name: String,
+	color: Color,
+	emission_color: Color,
+	size: float
+) -> MeshInstance3D:
+	var visual := MeshInstance3D.new()
+	visual.name = node_name
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(size, size)
+	visual.mesh = quad
+
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_UNSHADED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.albedo_color = color
+	material.emission_enabled = true
+	material.emission = emission_color
+	material.emission_energy_multiplier = 2.0
+	visual.material_override = material
+	visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	add_child(visual)
+	return visual
+
+
+func _update_day_night(delta: float) -> void:
+	world_time_minutes = fmod(
+		world_time_minutes + delta * 60.0 / 60.0,
+		1440.0
+	)
+
+	var time_hours := world_time_minutes / 60.0
+	var daylight_angle := (
+		(time_hours - 6.0) / 24.0
+	) * TAU
+	var sun_offset := Vector3(
+		cos(daylight_angle) * CELESTIAL_ORBIT_RADIUS,
+		sin(daylight_angle) * CELESTIAL_ORBIT_RADIUS,
+		0.0
+	)
+	var moon_offset := -sun_offset
+
+	if sun_visual != null:
+		sun_visual.global_position = player.global_position + sun_offset
+		sun_visual.visible = sun_offset.y > -20.0
+
+	if moon_visual != null:
+		moon_visual.global_position = player.global_position + moon_offset
+		moon_visual.visible = moon_offset.y > -20.0
+
+	if sun_light != null:
+		sun_light.global_position = player.global_position + sun_offset
+		sun_light.look_at(player.global_position, Vector3.UP)
+
+	if moon_light != null:
+		moon_light.global_position = player.global_position + moon_offset
+		moon_light.look_at(player.global_position, Vector3.UP)
+
+	var daylight := clampf(
+		sin((time_hours - 6.0) / 12.0 * PI),
+		0.0,
+		1.0
+	)
+
+	if sun_light != null:
+		sun_light.light_color = Color(
+			1.0,
+			0.91,
+			0.68,
+			1.0
+		)
+		sun_light.light_energy = lerpf(
+			0.0,
+			1.0,
+			daylight
+		)
+
+	if moon_light != null:
+		moon_light.light_energy = lerpf(
+			0.12,
+			0.0,
+			daylight
+		)
+
+	_update_sky_colors(time_hours, daylight)
+
+
+func _update_sky_colors(time_hours: float, daylight: float) -> void:
+	if world_environment == null or world_environment.environment == null:
+		return
+
+	var environment: Environment = world_environment.environment
+	if sky_material == null:
+		if environment.sky == null:
+			return
+		sky_material = environment.sky.sky_material as ProceduralSkyMaterial
+
+	var day_top := Color(
+		0.31,
+		0.64,
+		1.0,
+		1.0
+	)
+	var day_horizon := Color(
+		0.75,
+		0.90,
+		1.0,
+		1.0
+	)
+	var day_ground_bottom := Color(
+		0.68,
+		0.82,
+		0.85,
+		1.0
+	)
+	var day_ground_horizon := Color(
+		0.75,
+		0.90,
+		1.0,
+		1.0
+	)
+
+	var sunset_top := Color(
+		0.28,
+		0.24,
+		0.44,
+		1.0
+	)
+	var sunset_horizon := Color(
+		1.0,
+		0.45,
+		0.18,
+		1.0
+	)
+	var sunset_ground_bottom := Color(
+		0.28,
+		0.18,
+		0.20,
+		1.0
+	)
+	var sunset_ground_horizon := Color(
+		0.95,
+		0.42,
+		0.20,
+		1.0
+	)
+
+	var night_top := Color(
+		0.008,
+		0.015,
+		0.035,
+		1.0
+	)
+	var night_horizon := Color(
+		0.018,
+		0.035,
+		0.060,
+		1.0
+	)
+	var night_ground_bottom := Color(
+		0.004,
+		0.008,
+		0.018,
+		1.0
+	)
+	var night_ground_horizon := Color(
+		0.012,
+		0.028,
+		0.050,
+		1.0
+	)
+
+	var top_color: Color
+	var horizon_color: Color
+	var ground_bottom_color: Color
+	var ground_horizon_color: Color
+
+	if time_hours >= 4.0 and time_hours < 5.5:
+		var t := _smoothstep((time_hours - 4.0) / 1.5)
+		top_color = night_top.lerp(sunset_top, t)
+		horizon_color = night_horizon.lerp(sunset_horizon, t)
+		ground_bottom_color = night_ground_bottom.lerp(sunset_ground_bottom, t)
+		ground_horizon_color = night_ground_horizon.lerp(sunset_ground_horizon, t)
+	elif time_hours >= 5.5 and time_hours < 7.0:
+		var t := _smoothstep((time_hours - 5.5) / 1.5)
+		top_color = sunset_top.lerp(day_top, t)
+		horizon_color = sunset_horizon.lerp(day_horizon, t)
+		ground_bottom_color = sunset_ground_bottom.lerp(day_ground_bottom, t)
+		ground_horizon_color = sunset_ground_horizon.lerp(day_ground_horizon, t)
+	elif time_hours >= 7.0 and time_hours < 17.0:
+		top_color = day_top
+		horizon_color = day_horizon
+		ground_bottom_color = day_ground_bottom
+		ground_horizon_color = day_ground_horizon
+	elif time_hours >= 17.0 and time_hours < 18.5:
+		var t := _smoothstep((time_hours - 17.0) / 1.5)
+		top_color = day_top.lerp(sunset_top, t)
+		horizon_color = day_horizon.lerp(sunset_horizon, t)
+		ground_bottom_color = day_ground_bottom.lerp(sunset_ground_bottom, t)
+		ground_horizon_color = day_ground_horizon.lerp(sunset_ground_horizon, t)
+	elif time_hours >= 18.5 and time_hours < 20.0:
+		var t := _smoothstep((time_hours - 18.5) / 1.5)
+		top_color = sunset_top.lerp(night_top, t)
+		horizon_color = sunset_horizon.lerp(night_horizon, t)
+		ground_bottom_color = sunset_ground_bottom.lerp(night_ground_bottom, t)
+		ground_horizon_color = sunset_ground_horizon.lerp(night_ground_horizon, t)
+	else:
+		top_color = night_top
+		horizon_color = night_horizon
+		ground_bottom_color = night_ground_bottom
+		ground_horizon_color = night_ground_horizon
+
+	sky_material.sky_top_color = top_color
+	sky_material.sky_horizon_color = horizon_color
+	sky_material.ground_bottom_color = ground_bottom_color
+	sky_material.ground_horizon_color = ground_horizon_color
+
+	environment.ambient_light_color = Color(
+		0.14,
+		0.19,
+		0.26,
+		1.0
+	).lerp(Color.WHITE, daylight)
+	environment.ambient_light_energy = lerpf(
+		0.16,
+		1.0,
+		daylight
+	)
+
+
+func _smoothstep(value: float) -> float:
+	var t := clampf(value, 0.0, 1.0)
+	return t * t * (3.0 - 2.0 * t)
+
+
 func _create_shared_materials() -> void:
 	grass_material = StandardMaterial3D.new()
 	grass_material.albedo_texture = GRASS_TEXTURE
@@ -723,6 +1015,8 @@ func _create_shared_materials() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_day_night(delta)
+
 	if player_spawned:
 		if statistics_initialized:
 			distance_travelled += (
@@ -2324,6 +2618,7 @@ func save_world() -> void:
 	world_metadata["blocks_placed"] = blocks_placed
 	world_metadata["distance_travelled"] = distance_travelled
 	world_metadata["play_time_seconds"] = play_time_seconds
+	world_metadata["world_time_minutes"] = world_time_minutes
 
 	if player_spawned:
 		world_metadata["player_x"] = player.global_position.x
