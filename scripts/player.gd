@@ -495,62 +495,105 @@ func _solid_below_feet() -> bool:
 
 
 func _has_crouch_support_at(position: Vector3) -> bool:
-	# Minecraft's sneak edge handling checks whether the player's
-	# collision box would still have ground underneath it after moving
-	# down by the maximum step height. Use the actual crouched hitbox
-	# footprint instead of the player's center point.
+	# Mirror Minecraft's sneak-edge test: move the player's collision
+	# box downward by the maximum step height and check whether that
+	# lowered box still intersects the ground.
 	if collision_shape == null or not collision_shape.shape is BoxShape3D:
 		return true
 
 	var box: BoxShape3D = collision_shape.shape
-	var half_x: float = box.size.x * 0.5
-	var half_z: float = box.size.z * 0.5
 
-	const EPSILON: float = 0.001
 	const MAX_UP_STEP: float = 0.6
+	const EPSILON: float = 0.000001
 
-	var min_x: float = position.x - half_x + EPSILON
-	var max_x: float = position.x + half_x - EPSILON
-	var min_z: float = position.z - half_z + EPSILON
-	var max_z: float = position.z + half_z - EPSILON
+	# The player's collision shape is centered at its local Y offset.
+	# Convert it into world-space AABB bounds at the candidate position.
+	var shape_offset_y: float = collision_shape.position.y
+	var half_size: Vector3 = box.size * 0.5
 
-	var support_y: int = floori(
-		position.y - MAX_UP_STEP
+	var min_x: float = (
+		position.x
+		- half_size.x
+		+ EPSILON
 	)
+	var max_x: float = (
+		position.x
+		+ half_size.x
+		- EPSILON
+	)
+
+	var min_z: float = (
+		position.z
+		- half_size.z
+		+ EPSILON
+	)
+	var max_z: float = (
+		position.z
+		+ half_size.z
+		- EPSILON
+	)
+
+	# This is the Minecraft-style "box offset downward by maxUpStep"
+	# test. The box only needs to retain any genuine ground overlap;
+	# therefore the player can hang almost completely over an edge.
+	var min_y: float = (
+		position.y
+		+ shape_offset_y
+		- half_size.y
+		- MAX_UP_STEP
+		+ EPSILON
+	)
+	var max_y: float = (
+		position.y
+		+ shape_offset_y
+		+ half_size.y
+		- MAX_UP_STEP
+		- EPSILON
+	)
+
+	if min_x >= max_x or min_y >= max_y or min_z >= max_z:
+		return true
 
 	var min_block_x: int = floori(min_x)
 	var max_block_x: int = floori(max_x)
+	var min_block_y: int = floori(min_y)
+	var max_block_y: int = floori(max_y)
 	var min_block_z: int = floori(min_z)
 	var max_block_z: int = floori(max_z)
 
-	for x in range(min_block_x, max_block_x + 1):
-		for z in range(min_block_z, max_block_z + 1):
-			var block_id: int = world.get_block_world(
-				Vector3(
-					x + 0.5,
-					float(support_y) + 0.5,
-					z + 0.5
+	for y in range(min_block_y, max_block_y + 1):
+		for x in range(min_block_x, max_block_x + 1):
+			for z in range(min_block_z, max_block_z + 1):
+				var block_id: int = world.get_block_world(
+					Vector3(
+						x + 0.5,
+						y + 0.5,
+						z + 0.5
+					)
 				)
-			)
 
-			if not _is_solid_block(block_id):
-				continue
+				if not _is_solid_block(block_id):
+					continue
 
-			# The block must actually overlap the player's horizontal
-			# footprint. This lets the player hang almost completely over
-			# the edge while still retaining a tiny amount of support.
-			var overlaps_x: bool = (
-				min_x < float(x + 1) - EPSILON
-				and max_x > float(x) + EPSILON
-			)
+				# Only count blocks that actually intersect the lowered
+				# collision box. Merely touching a face is not enough.
+				var overlaps_x: bool = (
+					min_x < float(x + 1)
+					and max_x > float(x)
+				)
 
-			var overlaps_z: bool = (
-				min_z < float(z + 1) - EPSILON
-				and max_z > float(z) + EPSILON
-			)
+				var overlaps_y: bool = (
+					min_y < float(y + 1)
+					and max_y > float(y)
+				)
 
-			if overlaps_x and overlaps_z:
-				return true
+				var overlaps_z: bool = (
+					min_z < float(z + 1)
+					and max_z > float(z)
+				)
+
+				if overlaps_x and overlaps_y and overlaps_z:
+					return true
 
 	return false
 
