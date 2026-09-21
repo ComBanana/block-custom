@@ -47,6 +47,36 @@ theme_override_font_sizes/font_size = 48
 text = "BlockCraft"
 horizontal_alignment = 1
 
+[node name="UsernamePanel" type="PanelContainer" parent="."]
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -340.0
+offset_top = 240.0
+offset_right = -40.0
+offset_bottom = 370.0
+
+[node name="VBox" type="VBoxContainer" parent="UsernamePanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="UsernamePanel/VBox"]
+layout_mode = 2
+text = "Username"
+horizontal_alignment = 1
+
+[node name="UsernameInput" type="LineEdit" parent="UsernamePanel/VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+max_length = 16
+placeholder_text = "Player"
+alignment = 1
+
+[node name="ErrorLabel" type="Label" parent="UsernamePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.4, 0.35, 1)
+text = ""
+
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -295,3 +325,5 @@ text = "Back"
 [connection signal="value_changed" from="Center/SettingsPanel/VBox/FOVSlider" to="." method="_on_fov_changed"]
 [connection signal="item_selected" from="Center/SettingsPanel/VBox/WindowModeRow/WindowModeOption" to="." method="_on_window_mode_changed"]
 [connection signal="pressed" from="Center/SettingsPanel/VBox/BackButton" to="." method="_on_back_pressed"]
+[connection signal="text_submitted" from="UsernamePanel/VBox/UsernameInput" to="." method="_on_username_submitted"]
+[connection signal="focus_exited" from="UsernamePanel/VBox/UsernameInput" to="." method="_on_username_focus_exited"]
