@@ -677,14 +677,12 @@ func _apply_fog_settings() -> void:
 	environment.fog_mode = Environment.FOG_MODE_DEPTH
 
 	var view_distance := float(render_distance * CHUNK_SIZE)
-	var fog_begin := maxf(
-		32.0,
-		view_distance * 0.55
-	)
-	var fog_end := maxf(
-		fog_begin + 16.0,
-		view_distance * 0.92
-	)
+
+	# Fog is tied directly to the active render distance.
+	# It starts near the outer portion of the visible world and
+	# reaches full strength exactly at the render-distance boundary.
+	var fog_begin := view_distance * 0.70
+	var fog_end := view_distance
 
 	environment.fog_light_color = Color(
 		0.75,
@@ -692,8 +690,9 @@ func _apply_fog_settings() -> void:
 		1.0,
 		1.0
 	)
-	environment.fog_density = 0.01
+	environment.fog_density = 1.0
 	environment.fog_sky_affect = 0.95
+	environment.fog_depth_curve = 1.0
 	environment.fog_depth_begin = fog_begin
 	environment.fog_depth_end = fog_end
 
