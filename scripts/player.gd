@@ -420,8 +420,6 @@ func set_chat_active(active: bool) -> void:
 	if active:
 		break_requested = false
 		place_requested = false
-		sprint_toggled = sprint_toggled
-		crouch_toggled = crouch_toggled
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif controls_enabled:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -626,24 +624,23 @@ func _physics_process(delta: float) -> void:
 
 	if not chat_active:
 		_update_toggle_actions()
+		is_crouching = _is_crouch_active()
 
-	is_crouching = _is_crouch_active()
 	var moving_forward: bool = (
 		not chat_active
 		and Input.is_action_pressed("move_forward")
 	)
 
-	var sprinting: bool = (
-		not chat_active
-		and _is_sprint_active()
-		and not is_crouching
-	)
+	var sprinting: bool = false
+	if not chat_active:
+		sprinting = _is_sprint_active() and not is_crouching
 
-	_update_swim_crawl_state(
-		in_water,
-		head_in_water,
-		sprinting
-	)
+	if not chat_active:
+		_update_swim_crawl_state(
+			in_water,
+			head_in_water,
+			sprinting
+		)
 
 	var swimming: bool = swimming_mode
 
@@ -833,7 +830,8 @@ func _physics_process(delta: float) -> void:
 				velocity.y = jump_velocity
 
 		# Horizontal movement.
-		is_crouching = _is_crouch_active()
+		if not chat_active:
+			is_crouching = _is_crouch_active()
 
 		var current_speed := walk_speed
 
