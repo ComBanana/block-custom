@@ -454,7 +454,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not controls_enabled or chat_active:
 		return
 
-		if event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		rotate_y(-event.relative.x * mouse_sensitivity)
 
 		camera.rotation.x -= event.relative.y * mouse_sensitivity
