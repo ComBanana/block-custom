@@ -2195,11 +2195,11 @@ func process_mesh_queue() -> void:
 			)
 			continue
 
-		var apply_start_usec := Time.get_ticks_usec()
+		var mesh_apply_start_usec := Time.get_ticks_usec()
 		chunk.apply_mesh_buffer(result.buffer)
 		generation_profiler.record(
 			"mesh_apply",
-			float(Time.get_ticks_usec() - apply_start_usec) / 1000.0
+			float(Time.get_ticks_usec() - mesh_apply_start_usec) / 1000.0
 		)
 		enqueue_collision_chunk(
 			result.chunk_coordinate
