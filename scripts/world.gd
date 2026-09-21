@@ -2274,7 +2274,7 @@ func process_mesh_queue() -> void:
 
 func get_next_mesh_candidate() -> Vector2i:
 	while not player_edit_queue.is_empty():
-		var player_coord := player_edit_queue.pop_front()
+		var player_coord: Vector2i = player_edit_queue.pop_front()
 		if not player_edit_queued.has(player_coord):
 			continue
 		player_edit_queued.erase(player_coord)
