@@ -608,19 +608,23 @@ func _constrain_crouch_movement(
 	if distance <= 0.0:
 		return direction
 
-	# Minecraft backs off each horizontal axis in 0.05-block steps
-	# until the full movement would have no ground underneath the
-	# player's collision box. This is why the player can lean almost
-	# completely over an edge instead of stopping at the block center.
+	# Minecraft's edge protection operates on the actual horizontal
+	# movement components in three passes: X, Z, then X+Z together.
+	# The diagonal pass is important because checking the axes separately
+	# can otherwise allow a diagonal move to leave the supporting block.
 	const EDGE_BACKOFF_STEP: float = 0.05
 
-	var adjusted_x: float = direction.normalized().x * distance
-	var adjusted_z: float = direction.normalized().z * distance
+	var normalized_direction: Vector3 = direction.normalized()
+	var adjusted_x: float = normalized_direction.x * distance
+	var adjusted_z: float = normalized_direction.z * distance
 
+	# Pass 1: back off movement along X while the lowered hitbox has no
+	# support underneath it.
 	while (
-		absf(adjusted_x) > 0.0
+		adjusted_x != 0.0
 		and not _has_crouch_support_at(
-			global_position + Vector3(adjusted_x, 0.0, 0.0)
+			global_position
+			+ Vector3(adjusted_x, 0.0, 0.0)
 		)
 	):
 		if absf(adjusted_x) <= EDGE_BACKOFF_STEP:
@@ -628,12 +632,38 @@ func _constrain_crouch_movement(
 		else:
 			adjusted_x -= signf(adjusted_x) * EDGE_BACKOFF_STEP
 
+	# Pass 2: do the same independently along Z.
 	while (
-		absf(adjusted_z) > 0.0
+		adjusted_z != 0.0
 		and not _has_crouch_support_at(
-			global_position + Vector3(0.0, 0.0, adjusted_z)
+			global_position
+			+ Vector3(0.0, 0.0, adjusted_z)
 		)
 	):
+		if absf(adjusted_z) <= EDGE_BACKOFF_STEP:
+			adjusted_z = 0.0
+		else:
+			adjusted_z -= signf(adjusted_z) * EDGE_BACKOFF_STEP
+
+	# Pass 3: check the remaining diagonal movement as a whole.
+	# This is the part our previous implementation was missing.
+	while (
+		adjusted_x != 0.0
+		and adjusted_z != 0.0
+		and not _has_crouch_support_at(
+			global_position
+			+ Vector3(
+				adjusted_x,
+				0.0,
+				adjusted_z
+			)
+		)
+	):
+		if absf(adjusted_x) <= EDGE_BACKOFF_STEP:
+			adjusted_x = 0.0
+		else:
+			adjusted_x -= signf(adjusted_x) * EDGE_BACKOFF_STEP
+
 		if absf(adjusted_z) <= EDGE_BACKOFF_STEP:
 			adjusted_z = 0.0
 		else:
@@ -645,16 +675,13 @@ func _constrain_crouch_movement(
 	):
 		return Vector3.ZERO
 
-	# Return the remaining movement as a fraction of the original
-	# requested distance. The movement code multiplies this by the normal
-	# crouch speed, so the last fraction of a frame naturally slows down
-	# as the hitbox reaches the edge.
+	# Convert the remaining allowed movement back into the normalized
+	# movement scale expected by the acceleration code.
 	return Vector3(
-		adjusted_x,
+		adjusted_x / distance,
 		0.0,
-		adjusted_z
-	) / distance
-
+		adjusted_z / distance
+	)
 
 func _submerged_depth() -> float:
 	var depth := 0.0
