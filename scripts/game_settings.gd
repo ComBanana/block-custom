@@ -53,7 +53,7 @@ func load_from_disk() -> void:
 	render_distance = clampi(
 		int(config.get_value("video", "render_distance", render_distance)),
 		2,
-		16
+		64
 	)
 	fullscreen = bool(
 		config.get_value("video", "fullscreen", fullscreen)
@@ -110,7 +110,7 @@ func set_fov(value: float) -> void:
 
 
 func set_render_distance(value: int) -> void:
-	render_distance = clampi(value, 2, 16)
+	render_distance = clampi(value, 2, 64)
 	save_to_disk()
 
 
