@@ -51,10 +51,27 @@ class MeshSurface:
 		normals.append(normal)
 		normals.append(normal)
 
-		uvs.append(Vector2(0.0, 0.0))
-		uvs.append(Vector2(1.0, 0.0))
-		uvs.append(Vector2(1.0, 1.0))
-		uvs.append(Vector2(0.0, 1.0))
+		# Keep the top of side textures at the top of the block.
+		# Each side face has a different vertex winding, so one generic
+		# UV order would rotate/flip the grass-side texture.
+		match normal:
+			Vector3.FORWARD, Vector3.RIGHT:
+				uvs.append(Vector2(0.0, 1.0))
+				uvs.append(Vector2(1.0, 1.0))
+				uvs.append(Vector2(1.0, 0.0))
+				uvs.append(Vector2(0.0, 0.0))
+
+			Vector3.BACK, Vector3.LEFT:
+				uvs.append(Vector2(0.0, 1.0))
+				uvs.append(Vector2(0.0, 0.0))
+				uvs.append(Vector2(1.0, 0.0))
+				uvs.append(Vector2(1.0, 1.0))
+
+			_:
+				uvs.append(Vector2(0.0, 0.0))
+				uvs.append(Vector2(1.0, 0.0))
+				uvs.append(Vector2(1.0, 1.0))
+				uvs.append(Vector2(0.0, 1.0))
 
 		indices.append(base_index)
 		indices.append(base_index + 1)
@@ -86,6 +103,8 @@ class MeshBuffer:
 				return stone
 			4:
 				return sand
+			5:
+				return water
 			_:
 				return water
 
@@ -461,7 +480,7 @@ static func _add_water_faces(
 	if above == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_UP,
 			Vector3.UP,
@@ -476,7 +495,7 @@ static func _add_water_faces(
 	if below == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_DOWN,
 			Vector3.DOWN,
@@ -491,7 +510,7 @@ static func _add_water_faces(
 	if neighbor == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_FORWARD,
 			Vector3.FORWARD,
@@ -506,7 +525,7 @@ static func _add_water_faces(
 	if neighbor == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_BACK,
 			Vector3.BACK,
@@ -521,7 +540,7 @@ static func _add_water_faces(
 	if neighbor == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_LEFT,
 			Vector3.LEFT,
@@ -536,7 +555,7 @@ static func _add_water_faces(
 	if neighbor == AIR:
 		_add_face(
 			buffer,
-			4,
+			5,
 			origin,
 			FACE_RIGHT,
 			Vector3.RIGHT,
