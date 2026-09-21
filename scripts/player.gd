@@ -87,6 +87,8 @@ var swim_crawl_shape: BoxShape3D
 
 var swimming_mode: bool = false
 var crawling_mode: bool = false
+var sprint_toggled: bool = false
+var crouch_toggled: bool = false
 var target_camera_height: float = STANDING_CAMERA_HEIGHT
 var current_pose: String = "standing"
 
@@ -323,7 +325,7 @@ func _update_swim_crawl_state(
 	sprinting: bool
 ) -> void:
 	var moving_forward: bool = Input.is_action_pressed("move_forward")
-	var want_crouch: bool = Input.is_action_pressed("crouch") and not in_water
+	var want_crouch: bool = _is_crouch_active() and not in_water
 
 	if swimming_mode:
 		if in_water and moving_forward:
@@ -375,6 +377,32 @@ func _update_swim_crawl_state(
 		return
 
 	_set_standing_pose()
+
+
+func _update_toggle_actions() -> void:
+	if GameSettings.toggle_sprint:
+		if Input.is_action_just_pressed("sprint"):
+			sprint_toggled = not sprint_toggled
+	else:
+		sprint_toggled = false
+
+	if GameSettings.toggle_crouch:
+		if Input.is_action_just_pressed("crouch"):
+			crouch_toggled = not crouch_toggled
+	else:
+		crouch_toggled = false
+
+
+func _is_sprint_active() -> bool:
+	if GameSettings.toggle_sprint:
+		return sprint_toggled
+	return Input.is_action_pressed("sprint")
+
+
+func _is_crouch_active() -> bool:
+	if GameSettings.toggle_crouch:
+		return crouch_toggled
+	return Input.is_action_pressed("crouch")
 
 
 func enable_controls() -> void:
@@ -575,13 +603,15 @@ func _physics_process(delta: float) -> void:
 	else:
 		floor_snap_length = 0.1
 
-	is_crouching = Input.is_action_pressed("crouch")
+	_update_toggle_actions()
+
+	is_crouching = _is_crouch_active()
 	var moving_forward: bool = Input.is_action_pressed(
 		"move_forward"
 	)
 
 	var sprinting: bool = (
-		Input.is_action_pressed("sprint")
+		_is_sprint_active()
 		and not is_crouching
 	)
 
@@ -773,7 +803,7 @@ func _physics_process(delta: float) -> void:
 				velocity.y = jump_velocity
 
 		# Horizontal movement.
-		is_crouching = Input.is_action_pressed("crouch")
+		is_crouching = _is_crouch_active()
 
 		var current_speed := walk_speed
 
