@@ -267,7 +267,7 @@ text = "12"
 custom_minimum_size = Vector2(400, 30)
 layout_mode = 2
 min_value = 2.0
-max_value = 16.0
+max_value = 64.0
 value = 12.0
 
 [node name="FOVRow" type="HBoxContainer" parent="Center/SettingsPanel/VBox/VideoOptions"]
