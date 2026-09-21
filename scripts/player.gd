@@ -254,24 +254,41 @@ func _set_swim_crawl_pose() -> void:
 
 
 func _can_stand_up() -> bool:
-	# BlockCraft is a voxel world, so headroom is more reliable when
-	# checked against the actual block grid instead of querying the
-	# Jolt ConcavePolygonShape3D used by chunk collision.
-	if standing_shape == null:
+	# Only check the vertical space that would be newly occupied when
+	# moving from the current pose to the standing pose. A wall beside
+	# the player must not count as blocked headroom just because the
+	# player's full standing hitbox touches that wall.
+	if standing_shape == null or collision_shape == null:
 		return true
 
-	var half_size: Vector3 = standing_shape.size * 0.5
+	if not standing_shape is BoxShape3D:
+		return true
 
-	# Use a tiny inset so a block that only touches the player's side,
-	# floor, or head boundary is not treated as overlapping.
+	var standing_box: BoxShape3D = standing_shape
+	var current_height: float = (
+		collision_shape.shape.size.y
+		if collision_shape.shape is BoxShape3D
+		else standing_box.size.y
+	)
+
+	# If already standing, there is no extra vertical space to check.
+	if current_height >= standing_box.size.y - 0.001:
+		return true
+
+	var half_width_x: float = standing_box.size.x * 0.5
+	var half_width_z: float = standing_box.size.z * 0.5
+
+	# Small inset prevents exact face/corner touching from being treated
+	# as an occupied cell. The important part is that Y starts at the top
+	# of the current pose, not at the player's feet.
 	const EPSILON: float = 0.001
 
-	var min_x: float = global_position.x - half_size.x + EPSILON
-	var max_x: float = global_position.x + half_size.x - EPSILON
-	var min_y: float = global_position.y + EPSILON
-	var max_y: float = global_position.y + standing_shape.size.y - EPSILON
-	var min_z: float = global_position.z - half_size.z + EPSILON
-	var max_z: float = global_position.z + half_size.z - EPSILON
+	var min_x: float = global_position.x - half_width_x + EPSILON
+	var max_x: float = global_position.x + half_width_x - EPSILON
+	var min_y: float = global_position.y + current_height + EPSILON
+	var max_y: float = global_position.y + standing_box.size.y - EPSILON
+	var min_z: float = global_position.z - half_width_z + EPSILON
+	var max_z: float = global_position.z + half_width_z - EPSILON
 
 	if min_x > max_x or min_y > max_y or min_z > max_z:
 		return true
