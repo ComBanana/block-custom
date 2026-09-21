@@ -192,6 +192,7 @@ func _rebuild_full_history() -> void:
 	for child in history_messages_container.get_children():
 		child.queue_free()
 
+	# Keep chronological order: oldest at the top, newest at the bottom.
 	for message in chat_log:
 		history_messages_container.add_child(
 			_create_message_label(message)
@@ -225,4 +226,7 @@ func _update_message_fades() -> void:
 		label.modulate.a = 1.0 - fade_progress
 
 		if fade_progress >= 1.0:
-			_remove_recent_message(i)
+			# Fading a recent message must never delete it.
+			# It remains in the recent-message list and returns to
+			# full visibility whenever chat is opened again.
+			label.modulate.a = 0.0
