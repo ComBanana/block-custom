@@ -26,6 +26,9 @@ extends Control
 @onready var toggle_sprint_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleSprintButton
 @onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
 
+@onready var username_input: LineEdit = $UsernamePanel/VBox/UsernameInput
+@onready var username_error: Label = $UsernamePanel/VBox/ErrorLabel
+
 var worlds: Array[Dictionary] = []
 var legacy_migration_dialog: ConfirmationDialog
 
@@ -54,11 +57,13 @@ func _show_panel(panel: Control) -> void:
 
 
 func _on_play_pressed() -> void:
+	_save_username()
 	_refresh_worlds()
 	_show_panel(worlds_panel)
 
 
 func _on_create_pressed() -> void:
+	_save_username()
 	world_name_input.text = _default_world_name()
 	seed_input.text = ""
 	create_error.text = ""
@@ -84,6 +89,7 @@ func _on_controls_tab_pressed() -> void:
 func _on_toggle_sprint_pressed() -> void:
 	GameSettings.set_toggle_sprint(not GameSettings.toggle_sprint)
 	_update_toggle_buttons()
+	_load_username_ui()
 
 func _on_toggle_crouch_pressed() -> void:
 	GameSettings.set_toggle_crouch(not GameSettings.toggle_crouch)
@@ -98,7 +104,34 @@ func _update_toggle_buttons() -> void:
 	)
 
 
+func _on_username_submitted(_value: String) -> void:
+	_save_username()
+
+
+func _on_username_focus_exited() -> void:
+	_save_username()
+
+
+func _load_username_ui() -> void:
+	username_input.text = GameSettings.username
+	username_error.text = ""
+
+
+func _save_username() -> void:
+	var entered := username_input.text.strip_edges()
+	var cleaned := GameSettings.sanitize_username(entered)
+
+	if entered != "" and cleaned == "Player" and entered != "Player":
+		username_error.text = "Use 3-16 letters, numbers, or _."
+		return
+
+	GameSettings.set_username(cleaned)
+	username_input.text = GameSettings.username
+	username_error.text = ""
+
+
 func _on_quit_pressed() -> void:
+	_save_username()
 	get_tree().quit()
 
 
