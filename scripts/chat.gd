@@ -27,6 +27,7 @@ var recent_messages: Array[Dictionary] = []
 func _ready() -> void:
 	visible = true
 	chat_history_panel.visible = false
+	messages_container.visible = true
 	chat_input_panel.visible = false
 	chat_input.gui_input.connect(_on_chat_input_gui_input)
 
@@ -49,6 +50,7 @@ func _open_chat() -> void:
 	chat_open = true
 	visible = true
 	chat_history_panel.visible = true
+	messages_container.visible = false
 	chat_input_panel.visible = true
 	chat_input.text = ""
 	history_index = -1
