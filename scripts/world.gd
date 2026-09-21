@@ -766,7 +766,7 @@ func _create_celestial_visual(
 	visual.mesh = quad
 
 	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_UNSHADED
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	material.disable_fog = true
 	material.albedo_color = color
