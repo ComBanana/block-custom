@@ -705,56 +705,6 @@ func _physics_process(delta: float) -> void:
 	)
 
 
-func _update_view_bobbing(
-	delta: float,
-	input_vector: Vector2,
-	swimming: bool
-) -> void:
-	camera.position.x -= view_bob_x_offset
-	camera.position.y -= view_bob_y_offset
-	camera.rotation.z -= view_bob_roll_offset
-
-	var target_strength := 0.0
-	if (
-		GameSettings.view_bobbing
-		and not swimming
-		and is_on_floor()
-		and input_vector.length_squared() > 0.0
-	):
-		var horizontal_speed := Vector2(
-			velocity.x,
-			velocity.z
-		).length()
-		target_strength = clampf(
-			horizontal_speed / maxf(sprint_speed, 0.01),
-			0.0,
-			1.0
-		)
-		view_bob_time += delta * lerpf(
-			8.0,
-			13.0,
-			target_strength
-		)
-	else:
-		view_bob_time = lerp(
-			view_bob_time,
-			round(view_bob_time / TAU) * TAU,
-			1.0 - exp(-8.0 * delta)
-		)
-
-	view_bob_strength = lerpf(
-		view_bob_strength,
-		target_strength,
-		1.0 - exp(-10.0 * delta)
-	)
-
-	view_bob_x_offset = sin(view_bob_time * 0.5) * 0.025 * view_bob_strength
-	view_bob_y_offset = absf(sin(view_bob_time)) * 0.035 * view_bob_strength
-	view_bob_roll_offset = sin(view_bob_time * 0.5) * 0.015 * view_bob_strength
-
-	camera.position.x += view_bob_x_offset
-	camera.position.y += view_bob_y_offset
-	camera.rotation.z += view_bob_roll_offset
 
 
 	# ---------------------------------------------------------------
@@ -980,3 +930,54 @@ func _update_view_bobbing(
 			post_move_head_in_water,
 			sprinting
 		)
+
+func _update_view_bobbing(
+	delta: float,
+	input_vector: Vector2,
+	swimming: bool
+) -> void:
+	camera.position.x -= view_bob_x_offset
+	camera.position.y -= view_bob_y_offset
+	camera.rotation.z -= view_bob_roll_offset
+
+	var target_strength := 0.0
+	if (
+		GameSettings.view_bobbing
+		and not swimming
+		and is_on_floor()
+		and input_vector.length_squared() > 0.0
+	):
+		var horizontal_speed := Vector2(
+			velocity.x,
+			velocity.z
+		).length()
+		target_strength = clampf(
+			horizontal_speed / maxf(sprint_speed, 0.01),
+			0.0,
+			1.0
+		)
+		view_bob_time += delta * lerpf(
+			8.0,
+			13.0,
+			target_strength
+		)
+	else:
+		view_bob_time = lerp(
+			view_bob_time,
+			round(view_bob_time / TAU) * TAU,
+			1.0 - exp(-8.0 * delta)
+		)
+
+	view_bob_strength = lerpf(
+		view_bob_strength,
+		target_strength,
+		1.0 - exp(-10.0 * delta)
+	)
+
+	view_bob_x_offset = sin(view_bob_time * 0.5) * 0.025 * view_bob_strength
+	view_bob_y_offset = absf(sin(view_bob_time)) * 0.035 * view_bob_strength
+	view_bob_roll_offset = sin(view_bob_time * 0.5) * 0.015 * view_bob_strength
+
+	camera.position.x += view_bob_x_offset
+	camera.position.y += view_bob_y_offset
+	camera.rotation.z += view_bob_roll_offset
