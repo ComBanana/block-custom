@@ -70,8 +70,14 @@ var controls_enabled: bool = false
 var chat_active: bool = false
 var is_crouching: bool = false
 
-var break_requested: bool = false
-var place_requested: bool = false
+const BLOCK_ACTION_INTERVAL: float = 0.10
+const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
+
+var break_held: bool = false
+var place_held: bool = false
+var block_action_timer: float = 0.0
+var forward_tap_timer: float = 0.0
+var double_tap_sprint: bool = false
 
 
 const STANDING_HEIGHT: float = 1.8
@@ -399,8 +405,23 @@ func _update_toggle_actions() -> void:
 
 func _is_sprint_active() -> bool:
 	if GameSettings.toggle_sprint:
-		return sprint_toggled
-	return Input.is_action_pressed("sprint")
+		return sprint_toggled or double_tap_sprint
+	return Input.is_action_pressed("sprint") or double_tap_sprint
+
+
+func _update_double_tap_sprint(delta: float) -> void:
+	forward_tap_timer = maxf(forward_tap_timer - delta, 0.0)
+
+	if not Input.is_action_pressed("move_forward"):
+		double_tap_sprint = false
+		return
+
+	if Input.is_action_just_pressed("move_forward"):
+		if forward_tap_timer > 0.0:
+			double_tap_sprint = true
+			forward_tap_timer = 0.0
+		else:
+			forward_tap_timer = DOUBLE_TAP_SPRINT_WINDOW
 
 
 func _is_crouch_active() -> bool:
@@ -418,8 +439,11 @@ func set_chat_active(active: bool) -> void:
 	chat_active = active
 
 	if active:
-		break_requested = false
-		place_requested = false
+		break_held = false
+		place_held = false
+		block_action_timer = 0.0
+		double_tap_sprint = false
+		forward_tap_timer = 0.0
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif controls_enabled:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -429,12 +453,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not controls_enabled or chat_active:
 		return
 
-	if event is InputEventMouseButton and event.pressed:
+	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			break_requested = true
+			break_held = event.pressed
 
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			place_requested = true
+			place_held = event.pressed
 
 	if event is InputEventMouseMotion:
 		rotate_y(-event.relative.x * mouse_sensitivity)
@@ -599,16 +623,26 @@ func get_swim_direction(input_vector: Vector2) -> Vector3:
 
 func _physics_process(delta: float) -> void:
 	if chat_active:
-		break_requested = false
-		place_requested = false
+		break_held = false
+		place_held = false
+		block_action_timer = 0.0
 
-	if break_requested and not chat_active:
-		break_requested = false
-		break_block()
+	if not chat_active:
+		if not break_held and not place_held:
+			block_action_timer = 0.0
+		elif block_action_timer <= 0.0:
+			if break_held:
+				break_block()
+			elif place_held:
+				place_block()
+			block_action_timer = BLOCK_ACTION_INTERVAL
+		else:
+			block_action_timer -= delta
 
-	if place_requested and not chat_active:
-		place_requested = false
-		place_block()
+		_update_double_tap_sprint(delta)
+	else:
+		double_tap_sprint = false
+		forward_tap_timer = 0.0
 
 	var in_water: bool = is_in_water()
 	var head_in_water: bool = is_head_in_water()
