@@ -846,13 +846,13 @@ func _update_day_night(delta: float) -> void:
 		)
 		sun_light.light_energy = lerpf(
 			0.0,
-			1.0,
+			0.72,
 			daylight
 		)
 
 	if moon_light != null:
 		moon_light.light_energy = lerpf(
-			0.12,
+			0.08,
 			0.0,
 			daylight
 		)
@@ -997,8 +997,8 @@ func _update_sky_colors(time_hours: float, daylight: float) -> void:
 		1.0
 	).lerp(Color.WHITE, daylight)
 	environment.ambient_light_energy = lerpf(
-		0.16,
-		1.0,
+		0.12,
+		0.68,
 		daylight
 	)
 
