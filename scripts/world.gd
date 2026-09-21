@@ -723,7 +723,7 @@ func _create_celestial_bodies() -> void:
 
 	if sun_light != null:
 		sun_light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
-		sun_light.shadow_enabled = true
+		sun_light.shadow_enabled = GameSettings.light_shaders_enabled
 
 	moon_light = DirectionalLight3D.new()
 	moon_light.name = "MoonLight"
