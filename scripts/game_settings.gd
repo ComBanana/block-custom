@@ -34,11 +34,13 @@ func load_from_disk() -> void:
 	var path := settings_path()
 	var config := ConfigFile.new()
 	var error := config.load(path)
+	var loaded_legacy_settings := false
 
 	# Migrate the old Godot user:// settings file once.
 	if error != OK and path != LEGACY_SETTINGS_PATH:
 		if FileAccess.file_exists(LEGACY_SETTINGS_PATH):
 			error = config.load(LEGACY_SETTINGS_PATH)
+			loaded_legacy_settings = error == OK
 
 	if error != OK:
 		return
@@ -76,7 +78,7 @@ func load_from_disk() -> void:
 
 	# A file loaded from the legacy user:// location is immediately
 	# rewritten to the new Windows AppData location.
-	if path != settings_path():
+	if loaded_legacy_settings:
 		save_to_disk()
 
 
