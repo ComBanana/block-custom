@@ -61,6 +61,7 @@ var mountain_shape_noise := FastNoiseLite.new()
 
 @onready var player: CharacterBody3D = $"../Player"
 @onready var loading_screen: Control = $"../LoadingLayer/LoadingScreen"
+@onready var world_environment: WorldEnvironment = $"../WorldEnvironment"
 
 var chunk_scene := preload("res://scenes/Chunk.tscn")
 
@@ -655,6 +656,8 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	player.velocity = Vector3.ZERO
 
+	_apply_fog_settings()
+
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	player_chunk = world_to_chunk(
@@ -663,6 +666,35 @@ func _ready() -> void:
 
 	update_chunks()
 
+
+
+func _apply_fog_settings() -> void:
+	if world_environment == null or world_environment.environment == null:
+		return
+
+	var environment: Environment = world_environment.environment
+	environment.fog_enabled = GameSettings.fog_enabled
+
+	var view_distance := float(render_distance * CHUNK_SIZE)
+	var fog_begin := maxf(
+		32.0,
+		view_distance * 0.55
+	)
+	var fog_end := maxf(
+		fog_begin + 16.0,
+		view_distance * 0.92
+	)
+
+	environment.fog_light_color = Color(
+		0.75,
+		0.90,
+		1.0,
+		1.0
+	)
+	environment.fog_density = 0.01
+	environment.fog_sky_affect = 0.95
+	environment.fog_depth_begin = fog_begin
+	environment.fog_depth_end = fog_end
 
 
 func _create_shared_materials() -> void:
