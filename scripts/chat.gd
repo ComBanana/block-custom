@@ -125,9 +125,18 @@ func _add_message(message: String) -> void:
 	label.text = message
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-	label.theme_override_constants/outline_size = 3
-	label.theme_override_font_sizes/font_size = 16
+	label.add_theme_color_override(
+		"font_outline_color",
+		Color(0, 0, 0, 1)
+	)
+	label.add_theme_constant_override(
+		"outline_size",
+		3
+	)
+	label.add_theme_font_size_override(
+		"font_size",
+		16
+	)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	messages_container.add_child(label)
