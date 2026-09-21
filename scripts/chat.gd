@@ -192,7 +192,9 @@ func _rebuild_full_history() -> void:
 	for child in history_messages_container.get_children():
 		child.queue_free()
 
-	# Keep chronological order: oldest at the top, newest at the bottom.
+	# The log is chronological. The oldest message is first and the
+	# newest message is last, so the newest message appears at the
+	# bottom of the history view.
 	for message in chat_log:
 		history_messages_container.add_child(
 			_create_message_label(message)
@@ -202,7 +204,14 @@ func _rebuild_full_history() -> void:
 
 
 func _scroll_history_to_bottom() -> void:
-	history_scroll.scroll_vertical = history_scroll.get_v_scroll_bar().max_value
+	# Wait for the VBoxContainer and ScrollContainer to finish laying
+	# out the newly-created messages before calculating the scroll range.
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	history_scroll.scroll_vertical = (
+		history_scroll.get_v_scroll_bar().max_value
+	)
 
 
 func _update_message_fades() -> void:
