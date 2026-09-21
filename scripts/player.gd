@@ -87,6 +87,7 @@ var swim_crawl_shape: BoxShape3D
 
 var swimming_mode: bool = false
 var crawling_mode: bool = false
+var running: bool = false
 var sprint_toggled: bool = false
 var crouch_toggled: bool = false
 var target_camera_height: float = STANDING_CAMERA_HEIGHT
@@ -629,6 +630,9 @@ func _physics_process(delta: float) -> void:
 		"move_forward",
 		"move_backward"
 	)
+
+	# Running means sprint is active and the player is actually moving.
+	running = sprinting and input_vector.length_squared() > 0.0
 
 	# ---------------------------------------------------------------
 	# FOV
