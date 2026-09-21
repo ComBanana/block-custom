@@ -48,7 +48,7 @@ func _ready() -> void:
 	if version_label != null:
 		version_label.text = "v%s" % ProjectSettings.get_setting(
 			"application/config/version",
-			"0.1.1"
+			"0.2.1"
 		)
 	video_button.pressed.connect(_on_video_tab_pressed)
 	controls_button.pressed.connect(_on_controls_tab_pressed)
