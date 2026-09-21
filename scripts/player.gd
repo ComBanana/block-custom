@@ -619,11 +619,11 @@ func _constrain_crouch_movement(
 	if movement.length_squared() <= 0.000001:
 		return Vector3.ZERO
 
-	var movement_length: float = movement.length()
-	var movement_direction: Vector3 = movement / movement_length
-
-	var adjusted_x: float = movement_direction.x * distance
-	var adjusted_z: float = movement_direction.z * distance
+	# Convert the current velocity into the displacement this frame.
+	# Preserve the original X/Z magnitudes so diagonal crouch movement
+	# does not get slower just because both axes are active.
+	var adjusted_x: float = movement.x * distance
+	var adjusted_z: float = movement.z * distance
 
 	# Match Minecraft's X pass.
 	while (
@@ -698,13 +698,13 @@ func _constrain_crouch_velocity(delta: float) -> void:
 	if horizontal_velocity.length_squared() <= 0.000001:
 		return
 
-	var allowed := _constrain_crouch_movement(
+	var allowed_velocity := _constrain_crouch_movement(
 		horizontal_velocity,
 		delta
 	)
 
-	velocity.x *= allowed.x
-	velocity.z *= allowed.z
+	velocity.x = allowed_velocity.x
+	velocity.z = allowed_velocity.z
 
 
 func _submerged_depth() -> float:
