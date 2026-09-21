@@ -67,6 +67,7 @@ const BLOCK_RAY_LENGTH := 4.5
 
 var normal_fov: float
 var controls_enabled: bool = false
+var chat_active: bool = false
 var is_crouching: bool = false
 
 var break_requested: bool = false
@@ -413,8 +414,21 @@ func enable_controls() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+func set_chat_active(active: bool) -> void:
+	chat_active = active
+
+	if active:
+		break_requested = false
+		place_requested = false
+		sprint_toggled = sprint_toggled
+		crouch_toggled = crouch_toggled
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif controls_enabled:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if not controls_enabled:
+	if not controls_enabled or chat_active:
 		return
 
 	if event is InputEventMouseButton and event.pressed:
@@ -586,11 +600,15 @@ func get_swim_direction(input_vector: Vector2) -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
-	if break_requested:
+	if chat_active:
+		break_requested = false
+		place_requested = false
+
+	if break_requested and not chat_active:
 		break_requested = false
 		break_block()
 
-	if place_requested:
+	if place_requested and not chat_active:
 		place_requested = false
 		place_block()
 
@@ -606,15 +624,18 @@ func _physics_process(delta: float) -> void:
 	else:
 		floor_snap_length = 0.1
 
-	_update_toggle_actions()
+	if not chat_active:
+		_update_toggle_actions()
 
 	is_crouching = _is_crouch_active()
-	var moving_forward: bool = Input.is_action_pressed(
-		"move_forward"
+	var moving_forward: bool = (
+		not chat_active
+		and Input.is_action_pressed("move_forward")
 	)
 
 	var sprinting: bool = (
-		_is_sprint_active()
+		not chat_active
+		and _is_sprint_active()
 		and not is_crouching
 	)
 
@@ -626,12 +647,15 @@ func _physics_process(delta: float) -> void:
 
 	var swimming: bool = swimming_mode
 
-	var input_vector := Input.get_vector(
-		"move_left",
-		"move_right",
-		"move_forward",
-		"move_backward"
-	)
+	var input_vector := Vector2.ZERO
+
+	if not chat_active:
+		input_vector = Input.get_vector(
+			"move_left",
+			"move_right",
+			"move_forward",
+			"move_backward"
+		)
 
 	# Running means sprint is active and the player is actually moving.
 	running = sprinting and input_vector.length_squared() > 0.0
