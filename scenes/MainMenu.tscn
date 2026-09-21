@@ -236,7 +236,7 @@ text = "Back"
 
 [node name="SettingsPanel" type="PanelContainer" parent="Center"]
 visible = false
-custom_minimum_size = Vector2(450, 0)
+custom_minimum_size = Vector2(450, 560)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="Center/SettingsPanel"]
