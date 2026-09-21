@@ -495,47 +495,64 @@ func _solid_below_feet() -> bool:
 
 
 func _has_crouch_support_at(position: Vector3) -> bool:
-	# Minecraft sneaking prevents the player from walking off a block
-	# edge. Check the voxel directly below the player's feet.
-	const EPSILON: float = 0.001
-	const SUPPORT_DEPTH: float = 0.1
-
-	# Physics can leave the player's origin a tiny amount above the
-	# exact block-top height. Sample slightly below the feet so that
-	# this numerical offset cannot make a supported crouching player
-	# appear to have no floor.
-	var below_y: int = floori(
-		position.y - SUPPORT_DEPTH
-	)
-
-	var below_block: int = world.get_block_world(
-		Vector3(
-			position.x,
-			float(below_y) + 0.5,
-			position.z
-		)
-	)
-
-	if _is_solid_block(below_block):
+	# Minecraft's sneak edge handling checks whether the player's
+	# collision box would still have ground underneath it after moving
+	# down by the maximum step height. Use the actual crouched hitbox
+	# footprint instead of the player's center point.
+	if collision_shape == null or not collision_shape.shape is BoxShape3D:
 		return true
 
-	# Keep the adjacent-layer check so the guard still works correctly
-	# when approaching the top edge of a higher block.
-	var at_feet_y: int = floori(
-		position.y + EPSILON
+	var box: BoxShape3D = collision_shape.shape
+	var half_x: float = box.size.x * 0.5
+	var half_z: float = box.size.z * 0.5
+
+	const EPSILON: float = 0.001
+	const MAX_UP_STEP: float = 0.6
+
+	var min_x: float = position.x - half_x + EPSILON
+	var max_x: float = position.x + half_x - EPSILON
+	var min_z: float = position.z - half_z + EPSILON
+	var max_z: float = position.z + half_z - EPSILON
+
+	var support_y: int = floori(
+		position.y - MAX_UP_STEP
 	)
 
-	var at_feet_block: int = world.get_block_world(
-		Vector3(
-			position.x,
-			float(at_feet_y) + 0.5,
-			position.z
-		)
-	)
+	var min_block_x: int = floori(min_x)
+	var max_block_x: int = floori(max_x)
+	var min_block_z: int = floori(min_z)
+	var max_block_z: int = floori(max_z)
 
-	return _is_solid_block(at_feet_block)
+	for x in range(min_block_x, max_block_x + 1):
+		for z in range(min_block_z, max_block_z + 1):
+			var block_id: int = world.get_block_world(
+				Vector3(
+					x + 0.5,
+					float(support_y) + 0.5,
+					z + 0.5
+				)
+			)
 
+			if not _is_solid_block(block_id):
+				continue
 
+			# The block must actually overlap the player's horizontal
+			# footprint. This lets the player hang almost completely over
+			# the edge while still retaining a tiny amount of support.
+			var overlaps_x: bool = (
+				min_x < float(x + 1) - EPSILON
+				and max_x > float(x) + EPSILON
+			)
+
+			var overlaps_z: bool = (
+				min_z < float(z + 1) - EPSILON
+				and max_z > float(z) + EPSILON
+			)
+
+			if overlaps_x and overlaps_z:
+				return true
+
+	return false
 
 
 func _constrain_crouch_movement(
@@ -548,42 +565,48 @@ func _constrain_crouch_movement(
 	if distance <= 0.0:
 		return direction
 
-	var candidate: Vector3 = (
-		global_position
-		+ direction.normalized() * distance
-	)
+	# Minecraft backs off each horizontal axis in 0.05-block steps
+	# until the full movement would have no ground underneath the
+	# player's collision box. This is why the player can lean almost
+	# completely over an edge instead of stopping at the block center.
+	const EDGE_BACKOFF_STEP: float = 0.05
 
-	if _has_crouch_support_at(candidate):
-		return direction
+	var adjusted_x: float = direction.normalized().x * distance
+	var adjusted_z: float = direction.normalized().z * distance
 
-	# Preserve movement along an edge when only one component would
-	# carry the player into unsupported space.
-	var x_direction := Vector3(direction.x, 0.0, 0.0)
-	var z_direction := Vector3(0.0, 0.0, direction.z)
-
-	var x_safe: bool = false
-	var z_safe: bool = false
-
-	if absf(direction.x) > 0.000001:
-		x_safe = _has_crouch_support_at(
-			global_position + x_direction.normalized() * distance
+	while (
+		absf(adjusted_x) > 0.0
+		and not _has_crouch_support_at(
+			global_position + Vector3(adjusted_x, 0.0, 0.0)
 		)
+	):
+		if absf(adjusted_x) <= EDGE_BACKOFF_STEP:
+			adjusted_x = 0.0
+		else:
+			adjusted_x -= signf(adjusted_x) * EDGE_BACKOFF_STEP
 
-	if absf(direction.z) > 0.000001:
-		z_safe = _has_crouch_support_at(
-			global_position + z_direction.normalized() * distance
+	while (
+		absf(adjusted_z) > 0.0
+		and not _has_crouch_support_at(
+			global_position + Vector3(0.0, 0.0, adjusted_z)
 		)
+	):
+		if absf(adjusted_z) <= EDGE_BACKOFF_STEP:
+			adjusted_z = 0.0
+		else:
+			adjusted_z -= signf(adjusted_z) * EDGE_BACKOFF_STEP
 
-	if x_safe and z_safe:
-		return (x_direction + z_direction).normalized()
+	if (
+		absf(adjusted_x) <= 0.000001
+		and absf(adjusted_z) <= 0.000001
+	):
+		return Vector3.ZERO
 
-	if x_safe:
-		return x_direction.normalized()
-
-	if z_safe:
-		return z_direction.normalized()
-
-	return Vector3.ZERO
+	return Vector3(
+		adjusted_x,
+		0.0,
+		adjusted_z
+	).normalized()
 
 
 func _submerged_depth() -> float:
