@@ -165,6 +165,7 @@ theme_override_constants/separation = 2
 [node name="ChatHistoryPanel" type="PanelContainer" parent="HUD/Chat"]
 visible = false
 layout_mode = 0
+mouse_filter = 2
 anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 0.0
@@ -182,6 +183,7 @@ horizontal_scroll_mode = 0
 [node name="HistoryMessages" type="VBoxContainer" parent="HUD/Chat/ChatHistoryPanel/Scroll"]
 layout_mode = 2
 size_flags_horizontal = 3
+alignment = 2
 theme_override_constants/separation = 2
 
 [node name="ChatInputPanel" type="PanelContainer" parent="HUD/Chat"]
