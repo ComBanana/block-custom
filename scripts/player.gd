@@ -791,7 +791,7 @@ func _physics_process(delta: float) -> void:
 
 		if is_crouching:
 			input_velocity.y = -water_sneak_impulse_per_tick * 20.0 * vertical_drag
-		elif Input.is_action_pressed("jump"):
+		elif not chat_active and Input.is_action_pressed("jump"):
 			input_velocity.y += water_jump_impulse_per_tick * 20.0 * vertical_drag
 		elif swimming:
 			input_velocity.y = move_direction.y * acceleration * vertical_drag
@@ -805,6 +805,7 @@ func _physics_process(delta: float) -> void:
 
 		if (
 			moving_forward
+			and not chat_active
 			and Input.is_action_pressed("jump")
 			and _can_water_shore_jump(direction)
 		):
@@ -826,7 +827,7 @@ func _physics_process(delta: float) -> void:
 				velocity.y = 0.0
 
 			# Holding Space keeps the Minecraft-style bunny-hop.
-			if Input.is_action_pressed("jump"):
+			if not chat_active and Input.is_action_pressed("jump"):
 				velocity.y = jump_velocity
 
 		# Horizontal movement.
