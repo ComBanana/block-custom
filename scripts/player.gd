@@ -494,6 +494,87 @@ func _solid_below_feet() -> bool:
 	)
 
 
+func _has_crouch_support_at(position: Vector3) -> bool:
+	# Minecraft sneaking prevents the player from walking off a block
+	# edge. Check the voxel directly below the current foot level.
+	# A solid voxel at the current foot level is also allowed so normal
+	# movement toward a one-block-high step/wall can still be handled
+	# by the regular collision system.
+	const EPSILON: float = 0.001
+
+	var below_y: int = floori(position.y - EPSILON)
+	var at_feet_y: int = floori(position.y + EPSILON)
+
+	var below_block: int = world.get_block_world(
+		Vector3(
+			position.x,
+			float(below_y) + 0.5,
+			position.z
+		)
+	)
+
+	if _is_solid_block(below_block):
+		return true
+
+	var at_feet_block: int = world.get_block_world(
+		Vector3(
+			position.x,
+			float(at_feet_y) + 0.5,
+			position.z
+		)
+	)
+
+	return _is_solid_block(at_feet_block)
+
+
+func _constrain_crouch_movement(
+	direction: Vector3,
+	distance: float
+) -> Vector3:
+	if direction.length_squared() <= 0.000001:
+		return Vector3.ZERO
+
+	if distance <= 0.0:
+		return direction
+
+	var candidate: Vector3 = (
+		global_position
+		+ direction.normalized() * distance
+	)
+
+	if _has_crouch_support_at(candidate):
+		return direction
+
+	# Preserve movement along an edge when only one component would
+	# carry the player into unsupported space.
+	var x_direction := Vector3(direction.x, 0.0, 0.0)
+	var z_direction := Vector3(0.0, 0.0, direction.z)
+
+	var x_safe: bool = false
+	var z_safe: bool = false
+
+	if absf(direction.x) > 0.000001:
+		x_safe = _has_crouch_support_at(
+			global_position + x_direction.normalized() * distance
+		)
+
+	if absf(direction.z) > 0.000001:
+		z_safe = _has_crouch_support_at(
+			global_position + z_direction.normalized() * distance
+		)
+
+	if x_safe and z_safe:
+		return (x_direction + z_direction).normalized()
+
+	if x_safe:
+		return x_direction.normalized()
+
+	if z_safe:
+		return z_direction.normalized()
+
+	return Vector3.ZERO
+
+
 func _submerged_depth() -> float:
 	var depth := 0.0
 	var height: float = collision_shape.shape.size.y if collision_shape.shape is BoxShape3D else STANDING_HEIGHT
@@ -784,7 +865,20 @@ func _physics_process(delta: float) -> void:
 		elif is_crouching:
 			current_speed = crouch_speed
 
-		var target_velocity := direction * current_speed
+		var movement_direction: Vector3 = direction
+
+		if (
+			grounded_for_jump
+			and (is_crouching or crawling_mode)
+		):
+			movement_direction = _constrain_crouch_movement(
+				direction,
+				current_speed * delta
+			)
+
+		var target_velocity := (
+			movement_direction * current_speed
+		)
 
 		if grounded_for_jump:
 
