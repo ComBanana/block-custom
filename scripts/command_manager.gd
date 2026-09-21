@@ -4,7 +4,7 @@ extends RefCounted
 func execute(
 	raw_input: String,
 	player: CharacterBody3D,
-	world: Node
+	world: Node3D
 ) -> Dictionary:
 	var trimmed := raw_input.strip_edges()
 
@@ -36,9 +36,9 @@ func execute(
 
 
 func _execute_tp(
-	args: Array[String],
+	args: Array,
 	player: CharacterBody3D,
-	world: Node
+	world: Node3D
 ) -> Dictionary:
 	if args.size() != 3:
 		return {
