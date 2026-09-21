@@ -3,7 +3,6 @@ extends Control
 
 const MAX_VISIBLE_MESSAGES := 10
 const MAX_INPUT_HISTORY := 50
-const MAX_CHAT_LOG := 100
 const MESSAGE_LIFETIME := 5.0
 const MESSAGE_FADE_TIME := 1.5
 
@@ -115,9 +114,6 @@ func _on_chat_input_submitted(message: String) -> void:
 	]
 
 	chat_log.append(formatted)
-
-	if chat_log.size() > MAX_CHAT_LOG:
-		chat_log.pop_front()
 
 	_add_recent_message(formatted)
 
