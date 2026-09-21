@@ -22,6 +22,7 @@ func _ready() -> void:
 	visible = true
 	chat_input_panel.visible = false
 	chat_input.gui_input.connect(_on_chat_input_gui_input)
+	chat_input.text_submitted.connect(_on_chat_input_submitted)
 
 
 func _process(_delta: float) -> void:
