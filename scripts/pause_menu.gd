@@ -65,26 +65,48 @@ extends CanvasLayer
 )
 
 
+@onready var video_button: Button = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons/VideoButton
+)
+
+@onready var controls_button: Button = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons/ControlsButton
+)
+
+@onready var video_options: Control = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions
+)
+
+@onready var controls_options: Control = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions
+)
+
 @onready var render_distance_slider: HSlider = (
-	$PauseMenu/SettingsCenter/SettingsPanel/Content/RenderDistanceSlider
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceSlider
 )
 
 @onready var render_distance_value: Label = (
-	$PauseMenu/SettingsCenter/SettingsPanel/Content/RenderDistanceRow/RenderDistanceValue
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceRow/RenderDistanceValue
 )
 
-
 @onready var fov_slider: HSlider = (
-	$PauseMenu/SettingsCenter/SettingsPanel/Content/FOVSlider
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVSlider
 )
 
 @onready var fov_value: Label = (
-	$PauseMenu/SettingsCenter/SettingsPanel/Content/FOVRow/FOVValue
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVRow/FOVValue
 )
 
-
 @onready var window_mode_option: OptionButton = (
-	$PauseMenu/SettingsCenter/SettingsPanel/Content/WindowModeRow/WindowModeOption
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/WindowModeRow/WindowModeOption
+)
+
+@onready var toggle_sprint_button: Button = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions/ToggleSprintButton
+)
+
+@onready var toggle_crouch_button: Button = (
+	$PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions/ToggleCrouchButton
 )
 
 @onready var back_button: Button = (
@@ -123,6 +145,11 @@ func _ready() -> void:
 	window_mode_option.item_selected.connect(
 		_on_window_mode_changed
 	)
+
+	video_button.pressed.connect(_on_video_tab_pressed)
+	controls_button.pressed.connect(_on_controls_tab_pressed)
+	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
+	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
 
 	back_button.pressed.connect(close_settings)
 	statistics_back_button.pressed.connect(close_statistics)
@@ -188,6 +215,34 @@ func open_settings() -> void:
 	settings_center.visible = true
 
 	load_current_settings()
+	_show_settings_tab("video")
+
+func _show_settings_tab(tab: String) -> void:
+	var show_video: bool = tab == "video"
+	video_options.visible = show_video
+	controls_options.visible = not show_video
+
+func _on_video_tab_pressed() -> void:
+	_show_settings_tab("video")
+
+func _on_controls_tab_pressed() -> void:
+	_show_settings_tab("controls")
+
+func _on_toggle_sprint_pressed() -> void:
+	GameSettings.set_toggle_sprint(not GameSettings.toggle_sprint)
+	_update_toggle_buttons()
+
+func _on_toggle_crouch_pressed() -> void:
+	GameSettings.set_toggle_crouch(not GameSettings.toggle_crouch)
+	_update_toggle_buttons()
+
+func _update_toggle_buttons() -> void:
+	toggle_sprint_button.text = "Toggle Sprint: %s" % (
+		"ON" if GameSettings.toggle_sprint else "OFF"
+	)
+	toggle_crouch_button.text = "Toggle Crouch: %s" % (
+		"ON" if GameSettings.toggle_crouch else "OFF"
+	)
 
 
 func close_settings() -> void:
@@ -270,6 +325,8 @@ func load_current_settings() -> void:
 		window_mode_option.select(1)
 	else:
 		window_mode_option.select(0)
+
+	_update_toggle_buttons()
 
 
 func _on_render_distance_changed(value: float) -> void:
