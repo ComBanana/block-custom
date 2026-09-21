@@ -476,12 +476,13 @@ func is_in_water() -> bool:
 	var min_y: float = center.y - half_size.y
 	var max_y: float = center.y + half_size.y
 
-	# Use the player's center column for water state. A solid block
-	# beside the player may occupy part of the hitbox footprint, but
-	# that does not put the player in water. The center-column test
-	# matches the voxel position the player is actually standing in
-	# and avoids false water effects at block/water boundaries.
-	var block_y: int = floori((min_y + max_y) * 0.5)
+	# For body-fluid detection, use the voxel containing the player's
+	# feet rather than the middle of the hitbox. This is important at
+	# block edges: water in the neighboring lower voxel can have its
+	# surface below the player's feet and must not trigger water physics.
+	# At the same time, water occupying the voxel above the seafloor is
+	# still detected normally.
+	var block_y: int = floori(min_y)
 	var block_id: int = world.get_block_world(
 		Vector3(
 			center.x,
