@@ -89,7 +89,6 @@ func _on_controls_tab_pressed() -> void:
 func _on_toggle_sprint_pressed() -> void:
 	GameSettings.set_toggle_sprint(not GameSettings.toggle_sprint)
 	_update_toggle_buttons()
-	_load_username_ui()
 
 func _on_toggle_crouch_pressed() -> void:
 	GameSettings.set_toggle_crouch(not GameSettings.toggle_crouch)
@@ -217,6 +216,7 @@ func _default_world_name() -> String:
 
 
 func _load_settings_ui() -> void:
+	_load_username_ui()
 	render_distance_slider.value = GameSettings.render_distance
 	render_distance_value.text = str(GameSettings.render_distance)
 	fov_slider.value = GameSettings.fov
