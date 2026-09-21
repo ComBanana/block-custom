@@ -1,7 +1,7 @@
 extends Node3D
 
 const CHUNK_SIZE: int = 16
-const CHUNK_HEIGHT: int = 64
+const CHUNK_HEIGHT: int = 256
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -328,7 +328,7 @@ func generate_terrain() -> void:
 
 
 func replace_air_with_water() -> void:
-	const WATER_LEVEL := 10
+	const WATER_LEVEL := 50
 
 	for x in range(CHUNK_SIZE):
 		for y in range(WATER_LEVEL + 1):
