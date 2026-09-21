@@ -9,7 +9,7 @@ const COMMAND_MANAGER = preload("res://scripts/command_manager.gd")
 
 
 @onready var player: CharacterBody3D = $"../../Player"
-@onready var world: Node = $"../../World"
+@onready var world: Node3D = $"../../World"
 @onready var messages_container: VBoxContainer = $Messages
 @onready var chat_history_panel: PanelContainer = $ChatHistoryPanel
 @onready var history_scroll: ScrollContainer = $ChatHistoryPanel/Scroll
