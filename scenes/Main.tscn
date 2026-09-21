@@ -449,7 +449,7 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="SettingsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/SettingsCenter" unique_id=955647223]
-custom_minimum_size = Vector2(450, 420)
+custom_minimum_size = Vector2(450, 560)
 layout_mode = 2
 
 [node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel" unique_id=1168816740]
