@@ -66,7 +66,8 @@ class MeshSurface:
 
 
 class MeshBuffer:
-	var grass: MeshSurface = MeshSurface.new()
+	var grass_top: MeshSurface = MeshSurface.new()
+	var grass_side: MeshSurface = MeshSurface.new()
 	var dirt: MeshSurface = MeshSurface.new()
 	var stone: MeshSurface = MeshSurface.new()
 	var sand: MeshSurface = MeshSurface.new()
@@ -76,12 +77,14 @@ class MeshBuffer:
 	func surface_for_layer(layer: int) -> MeshSurface:
 		match layer:
 			0:
-				return grass
+				return grass_top
 			1:
-				return dirt
+				return grass_side
 			2:
-				return stone
+				return dirt
 			3:
+				return stone
+			4:
 				return sand
 			_:
 				return water
@@ -323,18 +326,26 @@ static func build(snapshot: PackedByteArray) -> MeshBuffer:
 	return buffer
 
 
-static func _layer_for_block(block_id: int) -> int:
-	match block_id:
-		GRASS:
+static func _layer_for_solid_face(
+	block_id: int,
+	face: int
+) -> int:
+	if block_id == GRASS:
+		if face == FACE_UP:
 			return 0
-		DIRT:
-			return 1
-		STONE:
+		if face == FACE_DOWN:
 			return 2
-		SAND:
+		return 1
+
+	match block_id:
+		DIRT:
+			return 2
+		STONE:
 			return 3
-		_:
+		SAND:
 			return 4
+		_:
+			return 2
 
 
 static func _add_solid_faces(
@@ -346,7 +357,6 @@ static func _add_solid_faces(
 	buffer: MeshBuffer
 ) -> void:
 	var origin := Vector3(x, y, z)
-	var layer: int = _layer_for_block(block_id)
 
 	var neighbor: int = snapshot[
 		padded_index(x, y + 1, z)
@@ -354,7 +364,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_UP),
 			origin,
 			FACE_UP,
 			Vector3.UP,
@@ -368,7 +378,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_DOWN),
 			origin,
 			FACE_DOWN,
 			Vector3.DOWN,
@@ -382,7 +392,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_FORWARD),
 			origin,
 			FACE_FORWARD,
 			Vector3.FORWARD,
@@ -396,7 +406,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_BACK),
 			origin,
 			FACE_BACK,
 			Vector3.BACK,
@@ -410,7 +420,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_LEFT),
 			origin,
 			FACE_LEFT,
 			Vector3.LEFT,
@@ -424,7 +434,7 @@ static func _add_solid_faces(
 	if neighbor == AIR or is_water(neighbor):
 		_add_face(
 			buffer,
-			layer,
+			_layer_for_solid_face(block_id, FACE_RIGHT),
 			origin,
 			FACE_RIGHT,
 			Vector3.RIGHT,
