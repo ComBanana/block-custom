@@ -26,6 +26,7 @@ extends Control
 @onready var toggle_sprint_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleSprintButton
 @onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
 
+@onready var username_panel: Control = $UsernamePanel
 @onready var username_input: LineEdit = $UsernamePanel/VBox/UsernameInput
 @onready var username_save_button: Button = $UsernamePanel/VBox/SaveButton
 @onready var username_saved_label: Label = $UsernamePanel/VBox/SavedLabel
@@ -57,6 +58,7 @@ func _show_panel(panel: Control) -> void:
 	worlds_panel.visible = panel == worlds_panel
 	create_panel.visible = panel == create_panel
 	settings_panel.visible = panel == settings_panel
+	username_panel.visible = panel == main_panel
 
 
 func _on_play_pressed() -> void:
