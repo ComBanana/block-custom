@@ -2,7 +2,7 @@ extends CanvasLayer
 
 
 @onready var pause_menu: Control = $PauseMenu
-@onready var version_label: Label = $PauseMenu/VersionLabel
+var version_label: Label
 
 @onready var resume_button: Button = (
 	$PauseMenu/Center/Panel/Buttons/ResumeButton
@@ -138,10 +138,12 @@ var is_paused: bool = false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	version_label.text = "v%s" % ProjectSettings.get_setting(
-		"application/config/version",
-		"0.1.1"
-	)
+	version_label = get_node_or_null("PauseMenu/VersionLabel") as Label
+	if version_label != null:
+		version_label.text = "v%s" % ProjectSettings.get_setting(
+			"application/config/version",
+			"0.1.1"
+		)
 
 	pause_menu.visible = false
 	settings_center.visible = false
