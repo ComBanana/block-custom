@@ -28,7 +28,7 @@ const TELEPORT_PRELOAD_RADIUS: int = 1
 
 
 @export_category("World")
-@export var render_distance: int = 12
+@export_range(2, 64, 1) var render_distance: int = 12
 
 
 @export_category("Loading")
