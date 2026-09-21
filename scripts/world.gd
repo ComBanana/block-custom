@@ -24,6 +24,7 @@ const INVALID_CHUNK := Vector2i(999999, 999999)
 const PRIORITY_PLAYER: int = 0
 const PRIORITY_NEAR: int = 1
 const PRIORITY_FAR: int = 2
+const TELEPORT_PRELOAD_RADIUS: int = 1
 
 
 @export_category("World")
@@ -108,6 +109,14 @@ var loaded_chunks: Dictionary = {}
 # ===================================================================
 
 var required_chunks: Dictionary = {}
+
+# Temporary high-priority area kept loaded while a teleport is being prepared.
+var teleport_required_chunks: Dictionary = {}
+var teleport_pending: bool = false
+var teleport_target := Vector3.ZERO
+var teleport_destination_chunk := INVALID_CHUNK
+
+signal teleport_completed(message: String)
 
 
 # ===================================================================
@@ -713,6 +722,7 @@ func _process(delta: float) -> void:
 	process_mesh_queue()
 	process_water_queue(delta)
 	process_collision_queue()
+	_process_pending_teleport()
 
 	if not player_spawned:
 		update_loading_progress()
@@ -824,6 +834,147 @@ func is_chunk_critical(
 # Required chunks
 # ===================================================================
 
+func _is_chunk_needed(
+	chunk_coord: Vector2i
+) -> bool:
+	return (
+		required_chunks.has(chunk_coord)
+		or teleport_required_chunks.has(chunk_coord)
+	)
+
+
+func _is_chunk_teleport_required(
+	chunk_coord: Vector2i
+) -> bool:
+	return teleport_required_chunks.has(chunk_coord)
+
+
+func _queue_pending_teleport_chunks() -> void:
+	if not teleport_pending:
+		return
+
+	for chunk_coord in teleport_required_chunks:
+		if loaded_chunks.has(chunk_coord):
+			continue
+
+		if load_queued.has(chunk_coord):
+			continue
+
+		load_queue.push_front(chunk_coord)
+		load_queued[chunk_coord] = true
+
+
+func _prepare_teleport_chunk_area(
+	destination_chunk: Vector2i
+) -> void:
+	teleport_required_chunks.clear()
+
+	for x_offset in range(
+		-TELEPORT_PRELOAD_RADIUS,
+		TELEPORT_PRELOAD_RADIUS + 1
+	):
+		for z_offset in range(
+			-TELEPORT_PRELOAD_RADIUS,
+			TELEPORT_PRELOAD_RADIUS + 1
+		):
+			teleport_required_chunks[
+				destination_chunk + Vector2i(
+					x_offset,
+					z_offset
+				)
+			] = true
+
+	_queue_pending_teleport_chunks()
+
+	# Promote already-loaded destination chunks to the critical
+	# generation, mesh, and collision paths.
+	for chunk_coord in teleport_required_chunks:
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if not chunk.is_generated:
+			if not critical_generation_queued.has(chunk_coord):
+				critical_generation_queue.push_front(chunk_coord)
+				critical_generation_queued[chunk_coord] = true
+			continue
+
+		enqueue_mesh_chunk(chunk_coord)
+
+		if chunk.mesh_ready:
+			enqueue_collision_chunk(chunk_coord)
+
+
+func request_teleport(
+	target: Vector3
+) -> Dictionary:
+	if teleport_pending:
+		return {
+			"success": false,
+			"message": "A teleport is already being prepared."
+		}
+
+	teleport_target = target
+	teleport_destination_chunk = world_to_chunk(target)
+	teleport_pending = true
+
+	_prepare_teleport_chunk_area(
+		teleport_destination_chunk
+	)
+
+	return {
+		"success": true,
+		"pending": true,
+		"message": "Preparing destination..."
+	}
+
+
+func _process_pending_teleport() -> void:
+	if not teleport_pending:
+		return
+
+	for chunk_coord in teleport_required_chunks:
+		if not loaded_chunks.has(chunk_coord):
+			return
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if (
+			not chunk.is_generated
+			or not chunk.mesh_ready
+			or not chunk.collision_ready
+		):
+			return
+
+	player.global_position = teleport_target
+	player.velocity = Vector3.ZERO
+	player_chunk = teleport_destination_chunk
+
+	var message := "Teleported to %s %s %s" % [
+		_format_teleport_coordinate(teleport_target.x),
+		_format_teleport_coordinate(teleport_target.y),
+		_format_teleport_coordinate(teleport_target.z)
+	]
+
+	teleport_pending = false
+	teleport_required_chunks.clear()
+	teleport_destination_chunk = INVALID_CHUNK
+	teleport_target = Vector3.ZERO
+
+	update_chunks()
+	update_collision_range()
+
+	teleport_completed.emit(message)
+
+
+func _format_teleport_coordinate(value: float) -> String:
+	if is_equal_approx(value, round(value)):
+		return str(int(round(value)))
+
+	return "%.3f" % value
+
+
 func update_chunks() -> void:
 
 	required_chunks.clear()
@@ -872,7 +1023,7 @@ func update_chunks() -> void:
 					player_chunk.y + z_offset
 				)
 
-				if not required_chunks.has(
+				if not _is_chunk_needed(
 					chunk_coord
 				):
 					continue
@@ -889,13 +1040,16 @@ func update_chunks() -> void:
 				load_queued[chunk_coord] = true
 
 
+	_queue_pending_teleport_chunks()
+
 	# Unload chunks outside render distance.
 	var chunks_to_remove: Array[Vector2i] = []
 
 	for chunk_coord in loaded_chunks:
 
-		if not required_chunks.has(
-			chunk_coord
+		if (
+			not required_chunks.has(chunk_coord)
+			and not teleport_required_chunks.has(chunk_coord)
 		):
 
 			chunks_to_remove.append(
@@ -928,7 +1082,7 @@ func process_load_queue() -> void:
 			chunk_coord
 		)
 
-		if not required_chunks.has(
+		if not _is_chunk_needed(
 			chunk_coord
 		):
 			continue
@@ -988,7 +1142,10 @@ func load_chunk(
 		enqueue_neighbor_meshes(chunk_coord)
 		return
 
-	if is_chunk_critical(chunk_coord):
+	if (
+		is_chunk_critical(chunk_coord)
+		or _is_chunk_teleport_required(chunk_coord)
+	):
 
 		critical_generation_queue.append(
 			chunk_coord
@@ -1085,7 +1242,7 @@ func process_generation_queue() -> void:
 
 		# The player may have moved away while the
 		# worker was generating it.
-		if not required_chunks.has(
+		if not _is_chunk_needed(
 			chunk_coord
 		):
 			continue
@@ -1144,7 +1301,7 @@ func process_generation_queue() -> void:
 			continue
 
 
-		if not required_chunks.has(
+		if not _is_chunk_needed(
 			chunk_coord
 		):
 			continue
@@ -1179,9 +1336,8 @@ func process_generation_queue() -> void:
 
 
 		var high_priority: bool = (
-			is_chunk_critical(
-				chunk_coord
-			)
+			is_chunk_critical(chunk_coord)
+			or _is_chunk_teleport_required(chunk_coord)
 		)
 
 
@@ -1226,7 +1382,7 @@ func get_next_generation_candidate() -> Vector2i:
 			continue
 
 
-		if not required_chunks.has(
+		if not _is_chunk_needed(
 			critical_coord
 		):
 			continue
@@ -1265,7 +1421,7 @@ func get_next_generation_candidate() -> Vector2i:
 			continue
 
 
-		if not required_chunks.has(
+		if not _is_chunk_needed(
 			chunk_coord
 		):
 			continue
@@ -1282,8 +1438,9 @@ func get_next_generation_candidate() -> Vector2i:
 
 		# A chunk can become critical while waiting in
 		# the normal queue.
-		if is_chunk_critical(
-			chunk_coord
+		if (
+			is_chunk_critical(chunk_coord)
+			or _is_chunk_teleport_required(chunk_coord)
 		):
 
 			if not critical_generation_queued.has(
@@ -1371,7 +1528,10 @@ func enqueue_mesh_chunk(
 	if not chunk.is_generated:
 		return
 	
-	if is_chunk_critical(chunk_coord):
+	if (
+		is_chunk_critical(chunk_coord)
+		or _is_chunk_teleport_required(chunk_coord)
+	):
 
 		if critical_mesh_queued.has(
 			chunk_coord
@@ -1648,7 +1808,10 @@ func process_mesh_queue() -> void:
 
 		var task_id: int = WorkerThreadPool.add_task(
 			mesh_callable,
-			is_chunk_critical(chunk_coord),
+			(
+				is_chunk_critical(chunk_coord)
+				or _is_chunk_teleport_required(chunk_coord)
+			),
 			"Mesh chunk (%d, %d)" % [
 				chunk_coord.x,
 				chunk_coord.y
@@ -1773,8 +1936,9 @@ func enqueue_collision_chunk(
 	):
 		return
 
-	if not is_chunk_within_collision_distance(
-		chunk_coord
+	if (
+		not is_chunk_within_collision_distance(chunk_coord)
+		and not _is_chunk_teleport_required(chunk_coord)
 	):
 		return
 
@@ -1793,7 +1957,10 @@ func enqueue_collision_chunk(
 	):
 		return
 
-	if is_chunk_critical(chunk_coord):
+	if (
+		is_chunk_critical(chunk_coord)
+		or _is_chunk_teleport_required(chunk_coord)
+	):
 
 		collision_queue.push_front(
 			chunk_coord
@@ -1818,8 +1985,9 @@ func update_collision_range() -> void:
 			chunk_coord
 		]
 
-		if is_chunk_within_collision_distance(
-			chunk_coord
+		if (
+			is_chunk_within_collision_distance(chunk_coord)
+			or _is_chunk_teleport_required(chunk_coord)
 		):
 
 			if (
@@ -1863,8 +2031,9 @@ func process_collision_queue() -> void:
 			chunk_coord
 		]
 
-		if not is_chunk_within_collision_distance(
-			chunk_coord
+		if (
+			not is_chunk_within_collision_distance(chunk_coord)
+			and not _is_chunk_teleport_required(chunk_coord)
 		):
 			continue
 
