@@ -73,11 +73,17 @@ var is_crouching: bool = false
 const BLOCK_ACTION_INTERVAL: float = 0.10
 const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
 
-var break_held: bool = false
-var place_held: bool = false
+const BLOCK_ACTION_INTERVAL: float = 0.10
+const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
+
 var block_action_timer: float = 0.0
 var forward_tap_timer: float = 0.0
 var double_tap_sprint: bool = false
+var view_bob_time: float = 0.0
+var view_bob_strength: float = 0.0
+var view_bob_x_offset: float = 0.0
+var view_bob_y_offset: float = 0.0
+var view_bob_roll_offset: float = 0.0
 
 
 const STANDING_HEIGHT: float = 1.8
@@ -439,8 +445,6 @@ func set_chat_active(active: bool) -> void:
 	chat_active = active
 
 	if active:
-		break_held = false
-		place_held = false
 		block_action_timer = 0.0
 		double_tap_sprint = false
 		forward_tap_timer = 0.0
@@ -453,14 +457,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not controls_enabled or chat_active:
 		return
 
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			break_held = event.pressed
-
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			place_held = event.pressed
-
-	if event is InputEventMouseMotion:
+		if event is InputEventMouseMotion:
 		rotate_y(-event.relative.x * mouse_sensitivity)
 
 		camera.rotation.x -= event.relative.y * mouse_sensitivity
@@ -471,33 +468,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		)
 
 	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_1:
-				world.selected_block = 1
+		for slot in range(1, 10):
+			if event.is_action_pressed("hotbar_%d" % slot):
+				match slot:
+					1:
+						world.selected_block = 1
+					2:
+						world.selected_block = WATER
+					_:
+						world.selected_block = 0
+				get_viewport().set_input_as_handled()
+				break
 
-			KEY_2:
-				world.selected_block = WATER
-
-			KEY_3:
-				world.selected_block = 0
-
-			KEY_4:
-				world.selected_block = 0
-
-			KEY_5:
-				world.selected_block = 0
-
-			KEY_6:
-				world.selected_block = 0
-
-			KEY_7:
-				world.selected_block = 0
-
-			KEY_8:
-				world.selected_block = 0
-
-			KEY_9:
-				world.selected_block = 0
 
 
 func _is_water_block(block_id: int) -> bool:
@@ -623,17 +605,18 @@ func get_swim_direction(input_vector: Vector2) -> Vector3:
 
 func _physics_process(delta: float) -> void:
 	if chat_active:
-		break_held = false
-		place_held = false
 		block_action_timer = 0.0
 
 	if not chat_active:
-		if not break_held and not place_held:
+		var break_active := Input.is_action_pressed("break_block")
+		var place_active := Input.is_action_pressed("place_block")
+
+		if not break_active and not place_active:
 			block_action_timer = 0.0
 		elif block_action_timer <= 0.0:
-			if break_held:
+			if break_active:
 				break_block()
-			elif place_held:
+			elif place_active:
 				place_block()
 			block_action_timer = BLOCK_ACTION_INTERVAL
 		else:
@@ -688,6 +671,8 @@ func _physics_process(delta: float) -> void:
 			"move_backward"
 		)
 
+	_update_view_bobbing(delta, input_vector, swimming)
+
 	# Running means sprint is active and the player is actually moving.
 	running = sprinting and input_vector.length_squared() > 0.0
 
@@ -721,6 +706,58 @@ func _physics_process(delta: float) -> void:
 		target_camera_height,
 		1.0 - exp(-camera_transition_speed * delta)
 	)
+
+
+func _update_view_bobbing(
+	delta: float,
+	input_vector: Vector2,
+	swimming: bool
+) -> void:
+	camera.position.x -= view_bob_x_offset
+	camera.position.y -= view_bob_y_offset
+	camera.rotation.z -= view_bob_roll_offset
+
+	var target_strength := 0.0
+	if (
+		GameSettings.view_bobbing
+		and not swimming
+		and is_on_floor()
+		and input_vector.length_squared() > 0.0
+	):
+		var horizontal_speed := Vector2(
+			velocity.x,
+			velocity.z
+		).length()
+		target_strength = clampf(
+			horizontal_speed / maxf(sprint_speed, 0.01),
+			0.0,
+			1.0
+		)
+		view_bob_time += delta * lerpf(
+			8.0,
+			13.0,
+			target_strength
+		)
+	else:
+		view_bob_time = lerp(
+			view_bob_time,
+			round(view_bob_time / TAU) * TAU,
+			1.0 - exp(-8.0 * delta)
+		)
+
+	view_bob_strength = lerpf(
+		view_bob_strength,
+		target_strength,
+		1.0 - exp(-10.0 * delta)
+	)
+
+	view_bob_x_offset = sin(view_bob_time * 0.5) * 0.025 * view_bob_strength
+	view_bob_y_offset = absf(sin(view_bob_time)) * 0.035 * view_bob_strength
+	view_bob_roll_offset = sin(view_bob_time * 0.5) * 0.015 * view_bob_strength
+
+	camera.position.x += view_bob_x_offset
+	camera.position.y += view_bob_y_offset
+	camera.rotation.z += view_bob_roll_offset
 
 
 	# ---------------------------------------------------------------
