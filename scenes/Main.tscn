@@ -5,6 +5,7 @@
 [ext_resource type="Script" uid="uid://dl1eytg3vi5b7" path="res://scripts/hud.gd" id="3_rarhs"]
 [ext_resource type="Script" uid="uid://cf1oh6mm6po" path="res://scripts/loading_screen.gd" id="4_vcsgt"]
 [ext_resource type="Texture2D" path="res://textures/run-icon.png" id="7_runicon"]
+[ext_resource type="Script" path="res://scripts/chat.gd" id="8_chat"]
 [ext_resource type="Texture2D" uid="uid://doybihnefmmiy" path="res://textures/dirt.png" id="5_c01mt"]
 [ext_resource type="Script" uid="uid://bsjemod2nujiv" path="res://scripts/pause_menu.gd" id="6_c01mt"]
 
@@ -135,6 +136,56 @@ layout_mode = 2
 [node name="Slot9" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1247082512]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 2
+
+[node name="Chat" type="Control" parent="HUD" unique_id=248531809]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+script = ExtResource("8_chat")
+
+[node name="Messages" type="VBoxContainer" parent="HUD/Chat"]
+layout_mode = 0
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -290.0
+offset_right = 650.0
+offset_bottom = -70.0
+grow_vertical = 0
+alignment = 2
+theme_override_constants/separation = 2
+
+[node name="ChatInputPanel" type="PanelContainer" parent="HUD/Chat"]
+visible = false
+layout_mode = 0
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -58.0
+offset_right = 650.0
+offset_bottom = -16.0
+grow_vertical = 0
+
+[node name="Margin" type="MarginContainer" parent="HUD/Chat/ChatInputPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 4
+
+[node name="ChatInput" type="LineEdit" parent="HUD/Chat/ChatInputPanel/Margin"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+max_length = 256
+placeholder_text = "Type a message..."
 
 [node name="RunIcon" type="TextureRect" parent="HUD" unique_id=220481905]
 anchors_preset = 7
@@ -477,4 +528,4 @@ text = "Toggle Crouch: OFF"
 [node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content"]
 custom_minimum_size = Vector2(300, 50)
 layout_mode = 2
-text = "Back"
+text = "Back"[connection signal="text_submitted" from="HUD/Chat/ChatInputPanel/Margin/ChatInput" to="HUD/Chat" method="_on_chat_input_submitted"]
