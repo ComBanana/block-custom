@@ -18,7 +18,7 @@ const WATER: int = 5
 const SEA_LEVEL: int = 50
 const NORMAL_LAND_HEIGHT: float = 51.0
 const MIN_TERRAIN_HEIGHT: float = 2.0
-const MAX_TERRAIN_HEIGHT: float = CHUNK_HEIGHT - 1.0
+const MAX_TERRAIN_HEIGHT: float = CHUNK_HEIGHT
 
 
 static func _get_index(
