@@ -495,64 +495,47 @@ func _solid_below_feet() -> bool:
 
 
 func _has_crouch_support_at(position: Vector3) -> bool:
-	# Minecraft sneaking prevents the player's hitbox from moving
-	# completely beyond a block edge. Check the actual horizontal
-	# footprint instead of its center point so being partially over an
-	# edge does not make all movement directions appear unsafe.
-	if collision_shape == null or not collision_shape.shape is BoxShape3D:
+	# Minecraft sneaking prevents the player from walking off a block
+	# edge. Check the voxel directly below the player's feet.
+	const EPSILON: float = 0.001
+	const SUPPORT_DEPTH: float = 0.1
+
+	# Physics can leave the player's origin a tiny amount above the
+	# exact block-top height. Sample slightly below the feet so that
+	# this numerical offset cannot make a supported crouching player
+	# appear to have no floor.
+	var below_y: int = floori(
+		position.y - SUPPORT_DEPTH
+	)
+
+	var below_block: int = world.get_block_world(
+		Vector3(
+			position.x,
+			float(below_y) + 0.5,
+			position.z
+		)
+	)
+
+	if _is_solid_block(below_block):
 		return true
 
-	var box: BoxShape3D = collision_shape.shape
-	var half_x: float = box.size.x * 0.5
-	var half_z: float = box.size.z * 0.5
+	# Keep the adjacent-layer check so the guard still works correctly
+	# when approaching the top edge of a higher block.
+	var at_feet_y: int = floori(
+		position.y + EPSILON
+	)
 
-	const EPSILON: float = 0.001
+	var at_feet_block: int = world.get_block_world(
+		Vector3(
+			position.x,
+			float(at_feet_y) + 0.5,
+			position.z
+		)
+	)
 
-	var min_x: float = position.x - half_x + EPSILON
-	var max_x: float = position.x + half_x - EPSILON
-	var min_z: float = position.z - half_z + EPSILON
-	var max_z: float = position.z + half_z - EPSILON
+	return _is_solid_block(at_feet_block)
 
-	var min_block_x: int = floori(min_x)
-	var max_block_x: int = floori(max_x)
-	var min_block_z: int = floori(min_z)
-	var max_block_z: int = floori(max_z)
 
-	# Check the block layer directly below the player's feet.
-	# Because floor snapping can leave the body a tiny amount above the
-	# block, use a very small downward epsilon when selecting the layer.
-	var below_y: int = floori(position.y - EPSILON)
-	var at_feet_y: int = floori(position.y + EPSILON)
-
-	for y: int in [below_y, at_feet_y]:
-		for x in range(min_block_x, max_block_x + 1):
-			for z in range(min_block_z, max_block_z + 1):
-				var block_id: int = world.get_block_world(
-					Vector3(
-						x + 0.5,
-						float(y) + 0.5,
-						z + 0.5
-					)
-				)
-
-				if not _is_solid_block(block_id):
-					continue
-
-				# Require actual horizontal overlap with this block.
-				var overlaps_x: bool = (
-					min_x < float(x + 1) - EPSILON
-					and max_x > float(x) + EPSILON
-				)
-
-				var overlaps_z: bool = (
-					min_z < float(z + 1) - EPSILON
-					and max_z > float(z) + EPSILON
-				)
-
-				if overlaps_x and overlaps_z:
-					return true
-
-	return false
 
 
 func _constrain_crouch_movement(
