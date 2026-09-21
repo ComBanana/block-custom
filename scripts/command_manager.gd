@@ -66,26 +66,9 @@ func _execute_tp(
 			"message": "Y coordinate must be between 0 and 63."
 		}
 
-	var target_chunk: Vector2i = world.world_to_chunk(target)
-
-	# Do not place the player inside an unloaded chunk.
-	if not world.can_player_enter_chunk(target_chunk):
-		return {
-			"success": false,
-			"message": "That location is not loaded yet."
-		}
-
-	player.global_position = target
-	player.velocity = Vector3.ZERO
-
-	return {
-		"success": true,
-		"message": "Teleported to %s %s %s" % [
-			_format_coordinate(target.x),
-			_format_coordinate(target.y),
-			_format_coordinate(target.z)
-		]
-	}
+	# Let the world streamer prepare the destination instead of
+	# requiring the destination chunk to already be loaded.
+	return world.request_teleport(target)
 
 
 func _format_coordinate(value: float) -> String:
