@@ -19,4 +19,4 @@ func _process(_delta: float) -> void:
 		floori(position.z)
 	]
 
-	run_icon.visible = GameSettings.toggle_sprint and player.running
+	run_icon.visible = GameSettings.toggle_sprint or player.running
