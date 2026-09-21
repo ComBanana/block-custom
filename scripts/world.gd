@@ -691,7 +691,7 @@ func _apply_fog_settings() -> void:
 		1.0
 	)
 	environment.fog_density = 1.0
-	environment.fog_sky_affect = 0.95
+	environment.fog_sky_affect = 0.0
 	environment.fog_depth_curve = 1.0
 	environment.fog_depth_begin = fog_begin
 	environment.fog_depth_end = fog_end
