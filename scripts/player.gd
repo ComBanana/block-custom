@@ -602,11 +602,15 @@ func _constrain_crouch_movement(
 	):
 		return Vector3.ZERO
 
+	# Return the remaining movement as a fraction of the original
+	# requested distance. The movement code multiplies this by the normal
+	# crouch speed, so the last fraction of a frame naturally slows down
+	# as the hitbox reaches the edge.
 	return Vector3(
 		adjusted_x,
 		0.0,
 		adjusted_z
-	).normalized()
+	) / distance
 
 
 func _submerged_depth() -> float:
