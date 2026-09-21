@@ -23,8 +23,12 @@ extends Control
 @onready var fov_slider: HSlider = $Center/SettingsPanel/VBox/VideoOptions/FOVSlider
 @onready var fov_value: Label = $Center/SettingsPanel/VBox/VideoOptions/FOVRow/Value
 @onready var window_mode_option: OptionButton = $Center/SettingsPanel/VBox/VideoOptions/WindowModeRow/WindowModeOption
+@onready var fog_button: Button = $Center/SettingsPanel/VBox/VideoOptions/FogButton
+@onready var view_bobbing_button: Button = $Center/SettingsPanel/VBox/VideoOptions/ViewBobbingButton
 @onready var toggle_sprint_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleSprintButton
 @onready var toggle_crouch_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/ToggleCrouchButton
+@onready var keybinds_button: Button = $Center/SettingsPanel/VBox/ControlsOptions/KeybindsButton
+const KEYBINDS_DIALOG_SCENE = preload("res://scenes/KeybindsDialog.tscn")
 
 @onready var username_panel: Control = $UsernamePanel
 @onready var username_input: LineEdit = $UsernamePanel/VBox/UsernameInput
@@ -42,6 +46,9 @@ func _ready() -> void:
 	controls_button.pressed.connect(_on_controls_tab_pressed)
 	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
 	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
+	fog_button.pressed.connect(_on_fog_pressed)
+	view_bobbing_button.pressed.connect(_on_view_bobbing_pressed)
+	keybinds_button.pressed.connect(_on_keybinds_pressed)
 	username_save_button.pressed.connect(_on_username_save_pressed)
 	get_tree().paused = false
 	_show_panel(main_panel)
@@ -96,6 +103,22 @@ func _on_toggle_sprint_pressed() -> void:
 func _on_toggle_crouch_pressed() -> void:
 	GameSettings.set_toggle_crouch(not GameSettings.toggle_crouch)
 	_update_toggle_buttons()
+
+func _on_fog_pressed() -> void:
+	GameSettings.set_fog_enabled(not GameSettings.fog_enabled)
+	_update_video_toggle_buttons()
+
+func _on_view_bobbing_pressed() -> void:
+	GameSettings.set_view_bobbing(not GameSettings.view_bobbing)
+	_update_video_toggle_buttons()
+
+func _on_keybinds_pressed() -> void:
+	var dialog = KEYBINDS_DIALOG_SCENE.instantiate()
+	add_child(dialog)
+
+func _update_video_toggle_buttons() -> void:
+	fog_button.text = "Fog: %s" % ("ON" if GameSettings.fog_enabled else "OFF")
+	view_bobbing_button.text = "View Bobbing: %s" % ("ON" if GameSettings.view_bobbing else "OFF")
 
 func _update_toggle_buttons() -> void:
 	toggle_sprint_button.text = "Toggle Sprint: %s" % (
@@ -235,6 +258,7 @@ func _load_settings_ui() -> void:
 	fov_value.text = "%d°" % roundi(GameSettings.fov)
 	window_mode_option.select(1 if GameSettings.fullscreen else 0)
 	_update_toggle_buttons()
+	_update_video_toggle_buttons()
 
 
 func _on_render_distance_changed(value: float) -> void:
