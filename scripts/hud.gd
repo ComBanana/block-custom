@@ -5,6 +5,7 @@ extends CanvasLayer
 @onready var coordinate_label: Label = $CoordinateLabel
 
 @onready var player: CharacterBody3D = $"../Player"
+@onready var run_icon: TextureRect = $RunIcon
 
 
 func _process(_delta: float) -> void:
@@ -17,3 +18,5 @@ func _process(_delta: float) -> void:
 		floori(position.y),
 		floori(position.z)
 	]
+
+	run_icon.visible = GameSettings.toggle_sprint and player.running
