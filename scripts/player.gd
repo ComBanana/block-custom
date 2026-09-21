@@ -73,9 +73,6 @@ var is_crouching: bool = false
 const BLOCK_ACTION_INTERVAL: float = 0.10
 const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
 
-const BLOCK_ACTION_INTERVAL: float = 0.10
-const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
-
 var block_action_timer: float = 0.0
 var forward_tap_timer: float = 0.0
 var double_tap_sprint: bool = false
