@@ -146,7 +146,7 @@ func _ready() -> void:
 	if version_label != null:
 		version_label.text = "v%s" % ProjectSettings.get_setting(
 			"application/config/version",
-			"0.1.1"
+			"0.2.1"
 		)
 
 	pause_menu.visible = false
