@@ -38,10 +38,14 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 @export_category("Loading")
 @export var spawn_load_radius: int = 1
-@export var loading_generation_boost: int = 4
-@export var loading_mesh_boost: int = 2
-@export var loading_mesh_apply_boost: int = 2
+@export var loading_chunks_per_frame: int = 16
+@export var loading_generation_boost: int = 6
+@export var loading_mesh_boost: int = 4
+@export var loading_mesh_apply_boost: int = 4
 @export var loading_collision_boost: int = 3
+@export var loading_focus_radius: int = 2
+@export var loading_scheduler_scan_limit: int = 64
+@export var loading_mesh_budget_ms: float = 8.0
 
 
 @export_category("Streaming")
@@ -1115,7 +1119,7 @@ func _generation_task_limit() -> int:
 		return 0
 
 	var limit := max_generation_tasks
-	if adaptive_streaming_enabled and not player_spawned:
+	if not player_spawned:
 		limit += loading_generation_boost
 
 	return mini(limit, _available_worker_budget())
@@ -1126,7 +1130,7 @@ func _mesh_task_limit() -> int:
 		return 0
 
 	var limit := max_mesh_tasks
-	if adaptive_streaming_enabled and not player_spawned:
+	if not player_spawned:
 		limit += loading_mesh_boost
 
 	return mini(limit, _available_worker_budget())
@@ -1134,23 +1138,29 @@ func _mesh_task_limit() -> int:
 
 func _mesh_apply_limit() -> int:
 	var limit := max_mesh_chunks_per_frame
-	if adaptive_streaming_enabled and not player_spawned:
+
+	if not player_spawned:
 		limit += loading_mesh_apply_boost
+
 	return maxi(limit, 1)
 
 
 func _mesh_apply_budget_ms() -> float:
-	if not adaptive_streaming_enabled or player_spawned:
-		return mesh_budget_ms
-	if mesh_budget_ms <= 0.0:
-		return 0.0
-	return mesh_budget_ms + 5.0
+	if not player_spawned:
+		return maxf(
+			0.0,
+			loading_mesh_budget_ms
+		)
+
+	return mesh_budget_ms
 
 
 func _collision_work_limit() -> int:
 	var limit := collisions_per_frame
-	if adaptive_streaming_enabled and not player_spawned:
+
+	if not player_spawned:
 		limit += loading_collision_boost
+
 	return maxi(limit, 1)
 
 
@@ -1169,6 +1179,33 @@ func _chunk_stream_score(chunk_coord: Vector2i) -> float:
 	if is_chunk_critical(chunk_coord):
 		score += 10000.0
 
+	if not player_spawned:
+		var spawn_dx: int = abs(
+			chunk_coord.x - player_chunk.x
+		)
+		var spawn_dz: int = abs(
+			chunk_coord.y - player_chunk.y
+		)
+		var spawn_radius: int = maxi(
+			0,
+			spawn_load_radius
+		)
+		var focus_radius: int = maxi(
+			spawn_radius,
+			loading_focus_radius
+		)
+
+		if (
+			spawn_dx <= spawn_radius
+			and spawn_dz <= spawn_radius
+		):
+			score += 50000.0
+		elif (
+			spawn_dx <= focus_radius
+			and spawn_dz <= focus_radius
+		):
+			score += 20000.0
+
 	if stream_direction.length_squared() > 0.01:
 		var alignment := offset.normalized().dot(stream_direction)
 		score += alignment * (12.0 + minf(stream_speed * 2.5, 24.0))
@@ -1182,7 +1219,15 @@ func _take_best_generation_candidate(
 ) -> Vector2i:
 	var best_index := -1
 	var best_score := -INF
-	var scan_count := mini(queue.size(), scheduler_scan_limit)
+	var scan_limit: int = scheduler_scan_limit
+
+	if not player_spawned:
+		scan_limit = maxi(
+			scan_limit,
+			loading_scheduler_scan_limit
+		)
+
+	var scan_count := mini(queue.size(), scan_limit)
 
 	for index in range(scan_count):
 		var coord: Vector2i = queue[index]
@@ -1218,7 +1263,15 @@ func _take_best_mesh_candidate(
 ) -> Vector2i:
 	var best_index := -1
 	var best_score := -INF
-	var scan_count := mini(queue.size(), scheduler_scan_limit)
+	var scan_limit: int = scheduler_scan_limit
+
+	if not player_spawned:
+		scan_limit = maxi(
+			scan_limit,
+			loading_scheduler_scan_limit
+		)
+
+	var scan_count := mini(queue.size(), scan_limit)
 
 	for index in range(scan_count):
 		var coord: Vector2i = queue[index]
@@ -1348,9 +1401,24 @@ func is_chunk_critical(
 		chunk_coord.y - player_chunk.y
 	)
 
+	var active_critical_distance: int = critical_chunk_distance
+
+	# Before the player enters the world, the bootstrap area must win
+	# over the normal background streaming ring. This keeps the
+	# loading phase focused on the chunks the player will immediately
+	# see and interact with.
+	if not player_spawned:
+		active_critical_distance = maxi(
+			active_critical_distance,
+			maxi(
+				loading_focus_radius,
+				spawn_load_radius
+			)
+		)
+
 	return (
-		dx <= critical_chunk_distance
-		and dz <= critical_chunk_distance
+		dx <= active_critical_distance
+		and dz <= active_critical_distance
 	)
 
 # ===================================================================
@@ -1591,9 +1659,19 @@ func update_chunks() -> void:
 func process_load_queue() -> void:
 
 	var loads_done: int = 0
+	var load_limit: int = chunks_loaded_per_frame
+
+	# During the loading screen the player is not moving, so loading
+	# chunk nodes can be much more aggressive without competing with
+	# gameplay input or physics.
+	if not player_spawned:
+		load_limit = maxi(
+			load_limit,
+			loading_chunks_per_frame
+		)
 
 	while (
-		loads_done < chunks_loaded_per_frame
+		loads_done < load_limit
 		and not load_queue.is_empty()
 	):
 
@@ -2016,6 +2094,17 @@ func enqueue_mesh_chunk(
 
 	if not chunk.is_generated:
 		return
+
+	# Spawn-area meshes are delayed until their required horizontal
+	# neighbors have generated. The mesher needs those borders to avoid
+	# treating unfinished neighbors as air, which otherwise causes the
+	# same chunk to be rebuilt repeatedly during startup.
+	if (
+		not player_spawned
+		and _is_chunk_in_spawn_area(chunk_coord)
+		and not _loading_mesh_neighbors_ready(chunk_coord)
+	):
+		return
 	
 	if (
 		is_chunk_critical(chunk_coord)
@@ -2072,6 +2161,55 @@ func enqueue_mesh_chunk(
 		)
 
 		far_mesh_queued[chunk_coord] = true
+
+
+func _is_chunk_in_spawn_area(
+	chunk_coord: Vector2i
+) -> bool:
+	var dx: int = abs(
+		chunk_coord.x - player_chunk.x
+	)
+	var dz: int = abs(
+		chunk_coord.y - player_chunk.y
+	)
+	var radius: int = maxi(
+		0,
+		spawn_load_radius
+	)
+
+	return (
+		dx <= radius
+		and dz <= radius
+	)
+
+
+func _loading_mesh_neighbors_ready(
+	chunk_coord: Vector2i
+) -> bool:
+	var offsets: Array[Vector2i] = [
+		Vector2i(1, 0),
+		Vector2i(-1, 0),
+		Vector2i(0, 1),
+		Vector2i(0, -1)
+	]
+
+	for offset: Vector2i in offsets:
+		var neighbor_coord := chunk_coord + offset
+
+		# A neighbor outside the active render area will be treated as
+		# air by the mesher, so it cannot invalidate this mesh later.
+		if not required_chunks.has(neighbor_coord):
+			continue
+
+		if not loaded_chunks.has(neighbor_coord):
+			return false
+
+		var neighbor = loaded_chunks[neighbor_coord]
+
+		if not neighbor.is_generated:
+			return false
+
+	return true
 
 
 # ===================================================================
@@ -2182,6 +2320,32 @@ func _build_mesh_worker(
 	) / 1000.0
 
 
+func _compare_completed_mesh_tasks(
+	first_id: int,
+	second_id: int
+) -> bool:
+	if not mesh_tasks.has(first_id):
+		return false
+
+	if not mesh_tasks.has(second_id):
+		return true
+
+	var first_result: MeshResult = mesh_tasks[first_id]
+	var second_result: MeshResult = mesh_tasks[second_id]
+
+	var first_score := _chunk_stream_score(
+		first_result.chunk_coordinate
+	)
+	var second_score := _chunk_stream_score(
+		second_result.chunk_coordinate
+	)
+
+	if is_equal_approx(first_score, second_score):
+		return first_id < second_id
+
+	return first_score > second_score
+
+
 func process_mesh_queue() -> void:
 
 	# ---------------------------------------------------------------
@@ -2196,6 +2360,11 @@ func process_mesh_queue() -> void:
 
 	var apply_start_usec: int = Time.get_ticks_usec()
 	var applied_count: int = 0
+
+	if not player_spawned and completed_tasks.size() > 1:
+		completed_tasks.sort_custom(
+			_compare_completed_mesh_tasks
+		)
 
 	for task_id in completed_tasks:
 		if (
