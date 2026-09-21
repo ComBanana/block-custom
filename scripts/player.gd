@@ -456,42 +456,13 @@ func _water_overlaps_vertical_range(
 	)
 
 	# Ignore tiny numerical contact. The player must actually overlap
-	# the rendered fluid volume, not merely touch its lower surface.
+	# the rendered fluid volume.
 	const EPSILON: float = 0.005
 
 	return (
 		max_y > water_bottom + EPSILON
 		and min_y < water_top - EPSILON
 	)
-
-
-func _is_water_at_horizontal_sample(
-	sample_x: float,
-	sample_z: float,
-	min_y: float,
-	max_y: float
-) -> bool:
-	var min_block_y: int = floori(min_y)
-	var max_block_y: int = floori(max_y - 0.000001)
-
-	for block_y in range(min_block_y, max_block_y + 1):
-		var block_id: int = world.get_block_world(
-			Vector3(
-				sample_x,
-				float(block_y) + 0.5,
-				sample_z
-			)
-		)
-
-		if _water_overlaps_vertical_range(
-			block_y,
-			block_id,
-			min_y,
-			max_y
-		):
-			return true
-
-	return false
 
 
 func is_in_water() -> bool:
@@ -505,39 +476,26 @@ func is_in_water() -> bool:
 	var min_y: float = center.y - half_size.y
 	var max_y: float = center.y + half_size.y
 
-	# Sample the center, four sides, and four corners of the player's
-	# horizontal footprint. This catches partial submersion without
-	# treating water whose surface is below the player's feet as water.
-	var half_x: float = half_size.x * 0.9
-	var half_z: float = half_size.z * 0.9
-	var sample_offsets := [
-		Vector3.ZERO,
-		Vector3(half_x, 0.0, 0.0),
-		Vector3(-half_x, 0.0, 0.0),
-		Vector3(0.0, 0.0, half_z),
-		Vector3(0.0, 0.0, -half_z),
-		Vector3(half_x, 0.0, half_z),
-		Vector3(half_x, 0.0, -half_z),
-		Vector3(-half_x, 0.0, half_z),
-		Vector3(-half_x, 0.0, -half_z)
-	]
-
-	for local_offset: Vector3 in sample_offsets:
-		var sample_position: Vector3 = (
-			center
-			+ global_transform.basis * local_offset
+	# Use the player's center column for water state. A solid block
+	# beside the player may occupy part of the hitbox footprint, but
+	# that does not put the player in water. The center-column test
+	# matches the voxel position the player is actually standing in
+	# and avoids false water effects at block/water boundaries.
+	var block_y: int = floori((min_y + max_y) * 0.5)
+	var block_id: int = world.get_block_world(
+		Vector3(
+			center.x,
+			float(block_y) + 0.5,
+			center.z
 		)
+	)
 
-		if _is_water_at_horizontal_sample(
-			sample_position.x,
-			sample_position.z,
-			min_y,
-			max_y
-		):
-			return true
-
-	return false
-
+	return _water_overlaps_vertical_range(
+		block_y,
+		block_id,
+		min_y,
+		max_y
+	)
 
 func is_head_in_water() -> bool:
 	var head_position: Vector3 = camera.global_position
