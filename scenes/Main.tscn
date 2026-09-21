@@ -4,6 +4,7 @@
 [ext_resource type="Script" uid="uid://c5ol4prxkmv3p" path="res://scripts/world.gd" id="3_0bbpv"]
 [ext_resource type="Script" uid="uid://dl1eytg3vi5b7" path="res://scripts/hud.gd" id="3_rarhs"]
 [ext_resource type="Script" uid="uid://cf1oh6mm6po" path="res://scripts/loading_screen.gd" id="4_vcsgt"]
+[ext_resource type="Texture2D" path="res://textures/run-icon.png" id="7_runicon"]
 [ext_resource type="Texture2D" uid="uid://doybihnefmmiy" path="res://textures/dirt.png" id="5_c01mt"]
 [ext_resource type="Script" uid="uid://bsjemod2nujiv" path="res://scripts/pause_menu.gd" id="6_c01mt"]
 
@@ -134,6 +135,24 @@ layout_mode = 2
 [node name="Slot9" type="Panel" parent="HUD/Hotbar/Slots" unique_id=1247082512]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 2
+
+[node name="RunIcon" type="TextureRect" parent="HUD" unique_id=220481905]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = 249.0
+offset_top = -60.0
+offset_right = 299.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+texture = ExtResource("7_runicon")
+expand_mode = 1
+stretch_mode = 5
+visible = false
 
 [node name="LoadingLayer" type="CanvasLayer" parent="." unique_id=333889242]
 layer = 100
