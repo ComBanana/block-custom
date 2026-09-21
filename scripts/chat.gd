@@ -5,6 +5,7 @@ const MAX_VISIBLE_MESSAGES := 10
 const MAX_INPUT_HISTORY := 50
 const MESSAGE_LIFETIME := 5.0
 const MESSAGE_FADE_TIME := 1.5
+const COMMAND_MANAGER = preload("res://scripts/command_manager.gd")
 
 
 @onready var player: CharacterBody3D = $"../../Player"
@@ -21,9 +22,11 @@ var input_history: Array[String] = []
 var history_index: int = -1
 var chat_log: Array[String] = []
 var recent_messages: Array[Dictionary] = []
+var command_manager: RefCounted
 
 
 func _ready() -> void:
+	command_manager = COMMAND_MANAGER.new()
 	visible = true
 	chat_history_panel.visible = false
 	messages_container.visible = true
@@ -108,6 +111,23 @@ func _on_chat_input_submitted(message: String) -> void:
 
 	if input_history.size() > MAX_INPUT_HISTORY:
 		input_history.pop_front()
+
+	if trimmed.begins_with("/"):
+		var result: Dictionary = command_manager.execute(
+			trimmed,
+			player,
+			$"../../World"
+		)
+		var command_message: String = result["message"]
+
+		chat_log.append(command_message)
+		_add_recent_message(command_message)
+
+		if chat_open:
+			_rebuild_full_history()
+
+		_close_chat()
+		return
 
 	var formatted := "<%s> %s" % [
 		GameSettings.username,
