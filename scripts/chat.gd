@@ -68,6 +68,7 @@ func _open_chat() -> void:
 func _close_chat() -> void:
 	chat_open = false
 	chat_history_panel.visible = false
+	messages_container.visible = true
 	chat_input_panel.visible = false
 	chat_input.release_focus()
 	chat_input.text = ""
