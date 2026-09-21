@@ -189,6 +189,9 @@ static func generate_chunk_data(
 	var mountain_values := PackedFloat32Array()
 	mountain_values.resize(CHUNK_SIZE * CHUNK_SIZE)
 
+	var river_values := PackedFloat32Array()
+	river_values.resize(CHUNK_SIZE * CHUNK_SIZE)
+
 	# ---------------------------------------------------------------
 	# PASS 1: calculate the final surface height for every column.
 	# ---------------------------------------------------------------
@@ -246,6 +249,7 @@ static func generate_chunk_data(
 
 			continentalness_values[index] = c
 			erosion_values[index] = e
+			river_values[index] = river_value
 
 			# Low erosion + positive continentalness produces the
 			# mountain belts. High erosion produces flatter terrain.
@@ -486,7 +490,7 @@ static func generate_chunk_data(
 			var river_bank: bool = (
 				height <= SEA_LEVEL + 2
 				and c > -0.02
-				and beach_value > 0.30
+				and absf(river_values[index]) < 0.19
 			)
 
 			var sand_surface: bool = (
