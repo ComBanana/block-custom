@@ -18,6 +18,20 @@ const WATER_FLOW_6: int = 11
 const WATER_FLOW_7: int = 12
 const WATER_FALLING: int = 13
 
+
+enum GenerationStage {
+	UNLOADED,
+	LOADING,
+	TERRAIN_GENERATING,
+	TERRAIN_READY,
+	MESH_QUEUED,
+	MESH_BUILDING,
+	MESH_READY,
+	COLLISION_QUEUED,
+	READY
+}
+
+
 const GRASS_TEXTURE := preload("res://textures/grass.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
@@ -36,6 +50,7 @@ var mountain_shape_noise: FastNoiseLite
 var generation_passes_done: bool = false
 var mesh_ready: bool = false
 var collision_ready: bool = false
+var generation_stage: GenerationStage = GenerationStage.UNLOADED
 
 var is_generated: bool = false
 var terrain_generating: bool = false
@@ -52,6 +67,14 @@ var water_material: StandardMaterial3D
 
 var mesh_job_id: int = 0
 var collision_faces := PackedVector3Array()
+
+
+func set_generation_stage(stage: GenerationStage) -> void:
+	generation_stage = stage
+
+
+func is_generation_stage_at_least(stage: GenerationStage) -> bool:
+	return generation_stage >= stage
 
 
 func _ready() -> void:
@@ -117,6 +140,8 @@ func get_block(x: int, y: int, z: int) -> int:
 
 
 func begin_terrain_generation() -> void:
+	set_generation_stage(GenerationStage.TERRAIN_GENERATING)
+
 	blocks.resize(
 		CHUNK_SIZE *
 		CHUNK_HEIGHT *
@@ -479,6 +504,7 @@ func apply_generated_data(
 ) -> void:
 
 	blocks = generated_blocks
+	set_generation_stage(GenerationStage.TERRAIN_READY)
 
 	terrain_x = CHUNK_SIZE
 	terrain_generating = false
@@ -495,6 +521,9 @@ func cancel_mesh_build() -> void:
 	mesh_building = false
 	mesh_ready = false
 	mesh_job_id += 1
+
+	if is_generated:
+		set_generation_stage(GenerationStage.MESH_QUEUED)
 
 
 func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
@@ -536,6 +565,7 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	mesh_building = false
 	mesh_ready = true
 	collision_ready = false
+	set_generation_stage(GenerationStage.MESH_READY)
 
 
 func _add_mesh_surface(
@@ -567,6 +597,9 @@ func clear_collision() -> void:
 	$ChunkCollision/CollisionShape.shape = null
 	collision_ready = false
 
+	if mesh_ready:
+		set_generation_stage(GenerationStage.MESH_READY)
+
 
 func build_collision() -> void:
 	if not mesh_ready:
@@ -578,12 +611,14 @@ func build_collision() -> void:
 	if collision_faces.is_empty():
 		$ChunkCollision/CollisionShape.shape = null
 		collision_ready = true
+		set_generation_stage(GenerationStage.READY)
 		return
 
 	var collision_shape := ConcavePolygonShape3D.new()
 	collision_shape.set_faces(collision_faces)
 	$ChunkCollision/CollisionShape.shape = collision_shape
 	collision_ready = true
+	set_generation_stage(GenerationStage.READY)
 
 
 func get_block_for_mesh(
