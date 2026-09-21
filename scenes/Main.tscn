@@ -520,6 +520,16 @@ min_value = 20.0
 max_value = 120.0
 value = 75.0
 
+[node name="FogButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
+custom_minimum_size = Vector2(400, 48)
+layout_mode = 2
+text = "Fog: ON"
+
+[node name="ViewBobbingButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
+custom_minimum_size = Vector2(400, 48)
+layout_mode = 2
+text = "View Bobbing: ON"
+
 [node name="WindowModeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
 layout_mode = 2
 
@@ -550,6 +560,11 @@ text = "Toggle Sprint: OFF"
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "Toggle Crouch: OFF"
+
+[node name="KeybindsButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions"]
+custom_minimum_size = Vector2(400, 48)
+layout_mode = 2
+text = "Keybinds"
 
 [node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content"]
 custom_minimum_size = Vector2(300, 50)
