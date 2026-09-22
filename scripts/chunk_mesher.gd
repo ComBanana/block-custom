@@ -558,6 +558,13 @@ static func _add_solid_faces(
 		)
 
 
+static func _water_side_height(block_id: int) -> float:
+	if block_id == WATER or block_id == WATER_FALLING:
+		return 1.0
+
+	return water_height(block_id)
+
+
 static func _add_water_faces(
 	snapshot: PackedByteArray,
 	x: int,
@@ -570,12 +577,9 @@ static func _add_water_faces(
 	var height: float = water_height(block_id)
 
 	# Water's visible surface sits one pixel below a full block.
-	# Keep that reduction for top faces, but side faces of source/falling
-	# water must still reach the full block height so stacked water does
-	# not leave a one-pixel empty stripe between layers.
-	var side_height: float = height
-	if block_id == WATER or block_id == WATER_FALLING:
-		side_height = 1.0
+	# Keep that reduction for top faces, but full source/falling water
+	# uses the full block height for its exposed sides.
+	var side_height: float = _water_side_height(block_id)
 
 	var above: int = snapshot[
 		padded_index(x, y + 1, z)
@@ -610,6 +614,7 @@ static func _add_water_faces(
 	var neighbor: int = snapshot[
 		padded_index(x, y, z - 1)
 	]
+	var neighbor_height: float = 0.0
 
 	if neighbor == AIR:
 		_add_face(
@@ -619,8 +624,24 @@ static func _add_water_faces(
 			FACE_FORWARD,
 			Vector3.FORWARD,
 			side_height,
-			false
+			false,
+			0,
+			0.0
 		)
+	elif is_water(neighbor):
+		neighbor_height = _water_side_height(neighbor)
+		if neighbor_height + 0.0001 < side_height:
+			_add_face(
+				buffer,
+				5,
+				origin,
+				FACE_FORWARD,
+				Vector3.FORWARD,
+				side_height,
+				false,
+				0,
+				neighbor_height
+			)
 
 	neighbor = snapshot[
 		padded_index(x, y, z + 1)
@@ -634,8 +655,24 @@ static func _add_water_faces(
 			FACE_BACK,
 			Vector3.BACK,
 			side_height,
-			false
+			false,
+			0,
+			0.0
 		)
+	elif is_water(neighbor):
+		neighbor_height = _water_side_height(neighbor)
+		if neighbor_height + 0.0001 < side_height:
+			_add_face(
+				buffer,
+				5,
+				origin,
+				FACE_BACK,
+				Vector3.BACK,
+				side_height,
+				false,
+				0,
+				neighbor_height
+			)
 
 	neighbor = snapshot[
 		padded_index(x - 1, y, z)
@@ -649,8 +686,24 @@ static func _add_water_faces(
 			FACE_LEFT,
 			Vector3.LEFT,
 			side_height,
-			false
+			false,
+			0,
+			0.0
 		)
+	elif is_water(neighbor):
+		neighbor_height = _water_side_height(neighbor)
+		if neighbor_height + 0.0001 < side_height:
+			_add_face(
+				buffer,
+				5,
+				origin,
+				FACE_LEFT,
+				Vector3.LEFT,
+				side_height,
+				false,
+				0,
+				neighbor_height
+			)
 
 	neighbor = snapshot[
 		padded_index(x + 1, y, z)
@@ -664,8 +717,24 @@ static func _add_water_faces(
 			FACE_RIGHT,
 			Vector3.RIGHT,
 			side_height,
-			false
+			false,
+			0,
+			0.0
 		)
+	elif is_water(neighbor):
+		neighbor_height = _water_side_height(neighbor)
+		if neighbor_height + 0.0001 < side_height:
+			_add_face(
+				buffer,
+				5,
+				origin,
+				FACE_RIGHT,
+				Vector3.RIGHT,
+				side_height,
+				false,
+				0,
+				neighbor_height
+			)
 
 
 static func _add_face(
@@ -676,7 +745,8 @@ static func _add_face(
 	normal: Vector3,
 	height: float,
 	include_collision: bool,
-	uv_rotation_steps: int = 0
+	uv_rotation_steps: int = 0,
+	bottom_height: float = 0.0
 ) -> void:
 	var v0: Vector3
 	var v1: Vector3
@@ -697,26 +767,26 @@ static func _add_face(
 			v3 = position + Vector3(1, 0, 0)
 
 		FACE_FORWARD:
-			v0 = position + Vector3(0, 0, 0)
-			v1 = position + Vector3(1, 0, 0)
+			v0 = position + Vector3(0, bottom_height, 0)
+			v1 = position + Vector3(1, bottom_height, 0)
 			v2 = position + Vector3(1, height, 0)
 			v3 = position + Vector3(0, height, 0)
 
 		FACE_BACK:
-			v0 = position + Vector3(0, 0, 1)
+			v0 = position + Vector3(0, bottom_height, 1)
 			v1 = position + Vector3(0, height, 1)
 			v2 = position + Vector3(1, height, 1)
-			v3 = position + Vector3(1, 0, 1)
+			v3 = position + Vector3(1, bottom_height, 1)
 
 		FACE_LEFT:
-			v0 = position + Vector3(0, 0, 0)
+			v0 = position + Vector3(0, bottom_height, 0)
 			v1 = position + Vector3(0, height, 0)
 			v2 = position + Vector3(0, height, 1)
-			v3 = position + Vector3(0, 0, 1)
+			v3 = position + Vector3(0, bottom_height, 1)
 
 		_:
-			v0 = position + Vector3(1, 0, 0)
-			v1 = position + Vector3(1, 0, 1)
+			v0 = position + Vector3(1, bottom_height, 0)
+			v1 = position + Vector3(1, bottom_height, 1)
 			v2 = position + Vector3(1, height, 1)
 			v3 = position + Vector3(1, height, 0)
 
