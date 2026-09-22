@@ -6,6 +6,9 @@ const WINDOWS_LEGACY_WORLDS_ROOT_SUFFIX := "Godot/app_userdata/BlockCraft/worlds
 const WINDOWS_WORLDS_ROOT_SUFFIX := "BlockCraft/worldsaves"
 const FALLBACK_WORLDS_ROOT := "user://worlds"
 
+const CURRENT_SAVE_FORMAT_VERSION: int = 2
+const UNKNOWN_LEGACY_GAME_VERSION: String = "0.0.0"
+
 
 static func worlds_dir() -> String:
 	if OS.get_name() == "Windows":
@@ -219,6 +222,15 @@ static func _load_metadata_from_root(
 
 	var data: Dictionary = parsed
 	data["name"] = world_name
+
+	# Worlds created before version metadata existed remain readable.
+	# Their chunk data is migrated by World when the chunk height changed.
+	if not data.has("save_format_version"):
+		data["save_format_version"] = 1
+
+	if not data.has("game_version"):
+		data["game_version"] = UNKNOWN_LEGACY_GAME_VERSION
+
 	return data
 
 
