@@ -430,17 +430,38 @@ func _water_has_upstream_supply(
 	return false
 
 
-func _water_spread_horizontal(
-	position: Vector3i,
-	current_level: int
-) -> void:
-	if current_level >= 7:
-		return
+func _water_amount(block_id: int) -> int:
+	if block_id == WATER or block_id == WATER_FALLING:
+		return 8
 
-	var next_level: int = current_level + 1
-	var next_block: int = _water_block_for_level(
-		next_level
+	if _is_water_flowing(block_id):
+		return 8 - _water_flow_level(block_id)
+
+	return 0
+
+
+func _water_block_for_amount(amount: int) -> int:
+	if amount >= 8:
+		return WATER
+
+	if amount <= 0:
+		return AIR
+
+	return WATER_FLOW_1 + clampi(
+		8 - amount - 1,
+		0,
+		6
 	)
+
+
+func _water_is_solid_below(position: Vector3i) -> bool:
+	var block_id := _water_get(position)
+	return block_id != AIR and not _is_water(block_id)
+
+
+func _water_new_state(position: Vector3i) -> int:
+	var source_count: int = 0
+	var max_amount: int = 0
 
 	var offsets: Array[Vector3i] = [
 		Vector3i(-1, 0, 0),
@@ -450,23 +471,200 @@ func _water_spread_horizontal(
 	]
 
 	for offset: Vector3i in offsets:
-		var target: Vector3i = position + offset
+		var neighbor_id := _water_get(position + offset)
+
+		if neighbor_id == WATER:
+			source_count += 1
+			max_amount = 8
+		elif _is_water_flowing(neighbor_id):
+			max_amount = maxi(
+				max_amount,
+				_water_amount(neighbor_id)
+			)
+
+	# Two or more horizontal source blocks create a new source when
+	# this position sits on solid ground or another source.
+	if source_count >= 2:
+		var below := position + Vector3i(0, -1, 0)
+		var below_id := _water_get(below)
+		if _water_is_solid_below(below) or below_id == WATER:
+			return WATER
+
+	# Any water directly above makes this a falling fluid state.
+	var above := _water_get(
+		position + Vector3i(0, 1, 0)
+	)
+	if _is_water(above):
+		return WATER_FALLING
+
+	# Horizontal flow loses one level of strength per block.
+	var next_amount: int = max_amount - 1
+	if next_amount <= 0:
+		return AIR
+
+	return _water_block_for_amount(next_amount)
+
+
+func _water_slope_distance(
+	position: Vector3i,
+	incoming_direction: Vector3i,
+	remaining_steps: int,
+	cache: Dictionary
+) -> int:
+	var cache_key := (
+		"%d,%d,%d|%d,%d|%d" % [
+			position.x,
+			position.y,
+			position.z,
+			incoming_direction.x,
+			incoming_direction.z,
+			remaining_steps
+		]
+	)
+
+	if cache.has(cache_key):
+		return int(cache[cache_key])
+
+	var below := position + Vector3i(0, -1, 0)
+	if _water_get(below) == AIR:
+		cache[cache_key] = 0
+		return 0
+
+	if remaining_steps <= 0:
+		cache[cache_key] = 1000
+		return 1000
+
+	var best: int = 1000
+	var directions: Array[Vector3i] = [
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for direction: Vector3i in directions:
+		if direction == incoming_direction:
+			continue
+
+		var next_position := position + direction
+		var next_id := _water_get(next_position)
+
+		if (
+			next_id != AIR
+			and not _is_water_flowing(next_id)
+			and next_id != WATER_FALLING
+		):
+			continue
+
+		var distance := _water_slope_distance(
+			next_position,
+			-direction,
+			remaining_steps - 1,
+			cache
+		)
+
+		if distance < best:
+			best = distance
+
+	cache[cache_key] = 1000 if best >= 1000 else best + 1
+	return int(cache[cache_key])
+
+
+func _water_spread_horizontal(
+	position: Vector3i,
+	current_id: int
+) -> void:
+	var current_amount: int = _water_amount(current_id)
+	if current_amount <= 1:
+		return
+
+	var spread_amount: int = current_amount - 1
+	if current_id == WATER_FALLING:
+		spread_amount = 7
+
+	var directions: Array[Vector3i] = [
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	var best_distance: int = 1000
+	var best_directions: Array[Vector3i] = []
+	var cache: Dictionary = {}
+
+	for direction: Vector3i in directions:
+		var target := position + direction
 		var target_id := _water_get(target)
 
-		if target_id == WATER or target_id == WATER_FALLING:
+		if (
+			target_id != AIR
+			and not _is_water_flowing(target_id)
+		):
+			continue
+
+		var distance: int = 0
+		var below := target + Vector3i(0, -1, 0)
+
+		if _water_get(below) != AIR:
+			distance = _water_slope_distance(
+				target,
+				-direction,
+				4,
+				cache
+			)
+
+		if distance < best_distance:
+			best_distance = distance
+			best_directions.clear()
+			best_directions.append(direction)
+		elif distance == best_distance:
+			best_directions.append(direction)
+
+	if best_directions.is_empty() or best_distance >= 1000:
+		return
+
+	for direction: Vector3i in best_directions:
+		var target := position + direction
+		var target_id := _water_get(target)
+		var desired_id: int = _water_block_for_amount(spread_amount)
+
+		# A flowing target calculates its level from all of its neighbors,
+		# just like Minecraft's getNewLiquid(), so it can strengthen or
+		# weaken when surrounding water changes.
+		if _is_water_flowing(target_id):
+			desired_id = _water_new_state(target)
+			if desired_id == WATER_FALLING:
+				desired_id = _water_block_for_amount(spread_amount)
+
+		if desired_id == AIR:
 			continue
 
 		if target_id == AIR:
-			_water_set(target, next_block)
-			continue
+			_water_set(target, desired_id)
+		elif _is_water_flowing(target_id):
+			var old_amount := _water_amount(target_id)
+			var new_amount := _water_amount(desired_id)
+			if new_amount != old_amount:
+				_water_set(target, desired_id)
 
-		if _is_water_flowing(target_id):
-			var target_level := _water_flow_level(
-				target_id
-			)
 
-			if target_level > next_level:
-				_water_set(target, next_block)
+func _water_process_source(position: Vector3i) -> void:
+	var below_position := position + Vector3i(0, -1, 0)
+	var below := _water_get(below_position)
+
+	if below == AIR:
+		_water_set(
+			below_position,
+			WATER_FALLING
+		)
+
+		# Minecraft sources only spread sideways during a downward flow
+		# when at least three horizontal source blocks support them.
+		if _water_count_source_neighbors(position) < 3:
+			return
+
+	_water_spread_horizontal(position, WATER)
 
 
 func _process_water_position(
@@ -475,26 +673,40 @@ func _process_water_position(
 	var current := _water_get(position)
 
 	# Empty cells can become infinite-water sources when two
-	# source blocks surround them and the floor is solid.
+	# horizontal source blocks surround them and the floor is solid.
 	if (
 		current == AIR
 		and _water_try_source_conversion(position)
 	):
 		current = WATER
 
-	if not _is_water(current):
+	if current == WATER:
+		_water_process_source(position)
 		return
 
-	var below_position := position + Vector3i(
-		0,
-		-1,
-		0
-	)
+	if current == WATER_FALLING:
+		var below_falling := _water_get(
+			position + Vector3i(0, -1, 0)
+		)
 
+		if below_falling == AIR:
+			_water_set(
+				position + Vector3i(0, -1, 0),
+				WATER_FALLING
+			)
+			return
+
+		# Falling water can feed a horizontal flow when it reaches a
+		# surface, while retaining its falling state as in Java Edition.
+		_water_spread_horizontal(position, WATER_FALLING)
+		return
+
+	if not _is_water_flowing(current):
+		return
+
+	var below_position := position + Vector3i(0, -1, 0)
 	var below := _water_get(below_position)
 
-	# Water always takes an available block below before
-	# attempting horizontal spread.
 	if below == AIR:
 		_water_set(
 			below_position,
@@ -502,41 +714,19 @@ func _process_water_position(
 		)
 		return
 
-	# Falling water becomes ordinary flowing water once
-	# it has reached a solid surface. It is not promoted to
-	# a permanent source block.
-	if current == WATER_FALLING:
-		if not _water_has_upstream_supply(position, 1):
-			_water_set(position, AIR)
-			return
+	var updated_state := _water_new_state(position)
 
-		_water_set(position, WATER_FLOW_1)
-		current = WATER_FLOW_1
-
-	# Flowing water retracts when no source or lower-level
-	# flow can still feed it.
-	if _is_water_flowing(current):
-		var current_level := _water_flow_level(current)
-
-		if not _water_has_upstream_supply(
-			position,
-			current_level
-		):
-			_water_set(position, AIR)
-			return
-
-		_water_spread_horizontal(
-			position,
-			current_level
-		)
+	if updated_state == AIR:
+		_water_set(position, AIR)
 		return
 
-	# Sources remain in place and spread as level 1 flow.
-	if current == WATER:
-		_water_spread_horizontal(
-			position,
-			0
-		)
+	if updated_state != current:
+		_water_set(position, updated_state)
+		if updated_state == WATER:
+			return
+		current = updated_state
+
+	_water_spread_horizontal(position, current)
 
 
 func process_water_queue(delta: float) -> void:
