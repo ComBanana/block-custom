@@ -3205,8 +3205,7 @@ func set_block_world(
 			floori(world_position.z)
 		)
 
-		_water_schedule(changed)
-		_water_schedule_neighbors(changed)
+		_water_schedule_changed(changed)
 
 	# Update neighboring chunks when an edit is on a chunk boundary.
 	if prioritize_player_edit:
