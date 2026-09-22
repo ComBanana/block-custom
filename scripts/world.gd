@@ -623,7 +623,7 @@ func _water_spread_horizontal(
 		elif distance == best_distance:
 			best_directions.append(direction)
 
-	if best_directions.is_empty() or best_distance >= 1000:
+	if best_directions.is_empty():
 		return
 
 	for direction: Vector3i in best_directions:
