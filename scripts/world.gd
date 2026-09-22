@@ -66,6 +66,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var water_updates_per_tick: int = 2048
 @export var water_tick_interval: float = 0.25
 @export var water_budget_ms: float = 2.0
+@export var water_falling_blocks_per_update: int = 8
 
 
 var terrain_noise := FastNoiseLite.new()
@@ -331,6 +332,37 @@ func _water_mark_mesh_dirty(
 		water_dirty_mesh_chunks[
 			chunk_coord + Vector2i(0, 1)
 		] = true
+
+
+func _water_set_quiet(
+	position: Vector3i,
+	block_id: int
+) -> bool:
+	# Batch fluid writes skip per-voxel scheduling. The caller wakes only
+	# the final frontier after the batch completes.
+	if _water_get(position) == block_id:
+		return false
+
+	set_block_world(
+		Vector3(
+			position.x + 0.001,
+			position.y + 0.001,
+			position.z + 0.001
+		),
+		block_id,
+		false,
+		false,
+		false,
+		false
+	)
+
+	water_block_cache.erase(position)
+
+	if _water_get(position) != block_id:
+		return false
+
+	_water_mark_mesh_dirty(position)
+	return true
 
 
 func _water_set(
@@ -630,6 +662,84 @@ func _water_spread_horizontal(
 			)
 
 
+func _water_extend_falling_column(
+	position: Vector3i
+) -> bool:
+	var cursor: Vector3i = position + Vector3i(0, -1, 0)
+	var written: int = 0
+	var limit: int = maxi(
+		1,
+		water_falling_blocks_per_update
+	)
+
+	while written < limit:
+		if _water_get(cursor) != AIR:
+			break
+
+		if not loaded_chunks.has(
+			world_to_chunk(
+				Vector3(
+					cursor.x + 0.001,
+					cursor.y + 0.001,
+					cursor.z + 0.001
+				)
+			)
+		):
+			break
+
+		if not _water_set_quiet(
+			cursor,
+			WATER_FALLING
+		):
+			break
+
+		written += 1
+		cursor += Vector3i(0, -1, 0)
+
+	if written > 0:
+		# Wake only the new bottom frontier. Intermediate falling voxels
+		# do not each need their own queued tick.
+		_water_schedule(cursor + Vector3i(0, 1, 0))
+		return true
+
+	return false
+
+
+func _water_retract_falling_column(
+	position: Vector3i
+) -> bool:
+	var cursor: Vector3i = position
+	var removed: int = 0
+	var limit: int = maxi(
+		1,
+		water_falling_blocks_per_update * 4
+	)
+
+	while removed < limit:
+		if _water_get(cursor) != WATER_FALLING:
+			break
+
+		if not _water_set_quiet(
+			cursor,
+			AIR
+		):
+			break
+
+		removed += 1
+		cursor += Vector3i(0, -1, 0)
+
+	if removed == 0:
+		return false
+
+	# Re-check the first non-falling cell at the bottom of the removed
+	# column. A horizontal flow there may now need to recalculate.
+	var bottom: Vector3i = cursor
+	if _is_water(_water_get(bottom)):
+		_water_schedule(bottom)
+
+	return true
+
+
 func _water_process_spread(
 	position: Vector3i,
 	current_id: int
@@ -684,8 +794,31 @@ func _process_water_position(
 ) -> void:
 	var current: int = _water_get(position)
 
-	# FlowingFluid.tick() recalculates every non-source fluid state first,
-	# including falling water.
+	# Falling water is the performance-critical vertical path. Vanilla
+	# Minecraft advances one block per fluid tick, but a long open shaft
+	# has no branching decisions between those cells. Batch contiguous
+	# falling cells so the column reaches its destination without doing
+	# hundreds of identical queue/lookup cycles.
+	if current == WATER_FALLING:
+		var above: int = _water_get(
+			position + Vector3i(0, 1, 0)
+		)
+
+		if not _is_water(above):
+			_water_retract_falling_column(position)
+			return
+
+		if _water_extend_falling_column(position):
+			return
+
+		_water_process_spread(
+			position,
+			current
+		)
+		return
+
+	# FlowingFluid.tick() recalculates every non-source, non-falling fluid
+	# state before spreading.
 	if current != WATER:
 		var updated_state: int = _water_new_state(position)
 
@@ -703,8 +836,6 @@ func _process_water_position(
 			)
 			current = updated_state
 
-		# If it became a source, the source does not need another level
-		# calculation during this tick, but it still performs spread().
 		if current == AIR:
 			return
 
