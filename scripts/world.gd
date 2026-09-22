@@ -278,10 +278,10 @@ func _water_block_for_amount(amount: int) -> int:
 
 
 func _water_schedule(
-	position: Vector3i,
+	block_position: Vector3i,
 	delay_ticks: int = DEFAULT_WATER_TICK_DELAY
 ) -> void:
-	if position.y < 0 or position.y >= CHUNK_HEIGHT:
+	if block_position.y < 0 or block_position.y >= CHUNK_HEIGHT:
 		return
 
 	var scheduled_tick: int = (
@@ -289,20 +289,20 @@ func _water_schedule(
 	)
 
 	var previous_tick: int = int(
-		water_scheduled_ticks.get(position, -1)
+		water_scheduled_ticks.get(block_position, -1)
 	)
 
 	# Keep the earliest scheduled update for this water cell.
 	if previous_tick >= 0 and previous_tick <= scheduled_tick:
 		return
 
-	water_scheduled_ticks[position] = scheduled_tick
+	water_scheduled_ticks[block_position] = scheduled_tick
 
 	var bucket: Array[Vector3i] = water_schedule_buckets.get(
 		scheduled_tick,
 		[]
 	)
-	bucket.append(position)
+	bucket.append(block_position)
 	water_schedule_buckets[scheduled_tick] = bucket
 
 
@@ -322,13 +322,13 @@ func _water_get(position: Vector3i) -> int:
 
 
 func _water_schedule_changed(
-	position: Vector3i
+	block_position: Vector3i
 ) -> void:
 	# Minecraft schedules the fluid itself when its state changes and
 	# wakes neighboring fluid blocks when a neighbor changes. Do not put
 	# empty cells into the queue unless they actually contain water.
-	if _is_water(_water_get(position)):
-		_water_schedule(position)
+	if _is_water(_water_get(block_position)):
+		_water_schedule(block_position)
 
 	var offsets: Array[Vector3i] = [
 		Vector3i(0, -1, 0),
@@ -340,21 +340,21 @@ func _water_schedule_changed(
 	]
 
 	for offset: Vector3i in offsets:
-		var neighbor: Vector3i = position + offset
+		var neighbor: Vector3i = block_position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
 
 
 func _water_mark_mesh_dirty(
-	position: Vector3i
+	block_position: Vector3i
 ) -> void:
 	var chunk_coord := world_to_chunk(
-		Vector3(position.x, position.y, position.z)
+		Vector3(block_position.x, block_position.y, block_position.z)
 	)
 	water_dirty_mesh_chunks[chunk_coord] = true
 
-	var local_x := posmod(position.x, CHUNK_SIZE)
-	var local_z := posmod(position.z, CHUNK_SIZE)
+	var local_x := posmod(block_position.x, CHUNK_SIZE)
+	var local_z := posmod(block_position.z, CHUNK_SIZE)
 
 	if local_x == 0:
 		water_dirty_mesh_chunks[
@@ -376,19 +376,19 @@ func _water_mark_mesh_dirty(
 
 
 func _water_set_quiet(
-	position: Vector3i,
+	block_position: Vector3i,
 	block_id: int
 ) -> bool:
 	# Batch fluid writes skip per-voxel scheduling. The caller wakes only
 	# the final frontier after the batch completes.
-	if _water_get(position) == block_id:
+	if _water_get(block_position) == block_id:
 		return false
 
 	set_block_world(
 		Vector3(
-			position.x + 0.001,
-			position.y + 0.001,
-			position.z + 0.001
+			block_position.x + 0.001,
+			block_position.y + 0.001,
+			block_position.z + 0.001
 		),
 		block_id,
 		false,
@@ -397,27 +397,27 @@ func _water_set_quiet(
 		false
 	)
 
-	water_block_cache.erase(position)
+	water_block_cache.erase(block_position)
 
-	if _water_get(position) != block_id:
+	if _water_get(block_position) != block_id:
 		return false
 
-	_water_mark_mesh_dirty(position)
+	_water_mark_mesh_dirty(block_position)
 	return true
 
 
 func _water_set(
-	position: Vector3i,
+	block_position: Vector3i,
 	block_id: int
 ) -> bool:
-	if _water_get(position) == block_id:
+	if _water_get(block_position) == block_id:
 		return false
 
 	set_block_world(
 		Vector3(
-			position.x + 0.001,
-			position.y + 0.001,
-			position.z + 0.001
+			block_position.x + 0.001,
+			block_position.y + 0.001,
+			block_position.z + 0.001
 		),
 		block_id,
 		false,
@@ -426,20 +426,20 @@ func _water_set(
 		false
 	)
 
-	# The cached block state is now stale because this position changed.
+	# The cached block state is now stale because this block_position changed.
 	water_block_cache.clear()
 
 	# A failed write means the destination chunk is not currently loaded.
-	if _water_get(position) != block_id:
+	if _water_get(block_position) != block_id:
 		return false
 
-	_water_mark_mesh_dirty(position)
-	_water_schedule_changed(position)
+	_water_mark_mesh_dirty(block_position)
+	_water_schedule_changed(block_position)
 	return true
 
 
 func _water_count_source_neighbors(
-	position: Vector3i
+	block_position: Vector3i
 ) -> int:
 	var count: int = 0
 
@@ -451,7 +451,7 @@ func _water_count_source_neighbors(
 	]
 
 	for offset: Vector3i in offsets:
-		if _water_get(position + offset) == WATER:
+		if _water_get(block_position + offset) == WATER:
 			count += 1
 
 	return count
@@ -471,9 +471,9 @@ func _water_is_replaceable(
 
 
 func _water_can_pass_through(
-	position: Vector3i
+	block_position: Vector3i
 ) -> bool:
-	var block_id: int = _water_get(position)
+	var block_id: int = _water_get(block_position)
 
 	# Water cannot flow into/through a source block.
 	if block_id == WATER:
@@ -483,16 +483,16 @@ func _water_can_pass_through(
 
 
 func _water_is_hole(
-	position: Vector3i
+	block_position: Vector3i
 ) -> bool:
-	# Minecraft's isWaterHole() asks whether this position can pass fluid
+	# Minecraft's isWaterHole() asks whether this block_position can pass fluid
 	# downward. An air cell above air is an immediate hole; an existing
 	# water cell also counts as a valid fluid continuation.
-	if not _water_can_pass_through(position):
+	if not _water_can_pass_through(block_position):
 		return false
 
 	var below: Vector3i = (
-		position + Vector3i(0, -1, 0)
+		block_position + Vector3i(0, -1, 0)
 	)
 	var below_id: int = _water_get(below)
 
@@ -503,7 +503,7 @@ func _water_is_hole(
 
 
 func _water_new_state(
-	position: Vector3i
+	block_position: Vector3i
 ) -> int:
 	# This is FlowingFluid.getNewLiquid(): inspect all four horizontal
 	# neighbors, count sources, take the strongest neighbor amount,
@@ -520,7 +520,7 @@ func _water_new_state(
 
 	for offset: Vector3i in offsets:
 		var neighbor_id: int = _water_get(
-			position + offset
+			block_position + offset
 		)
 
 		if not _is_water(neighbor_id):
@@ -536,7 +536,7 @@ func _water_new_state(
 
 	if source_count >= 2:
 		var below_id: int = _water_get(
-			position + Vector3i(0, -1, 0)
+			block_position + Vector3i(0, -1, 0)
 		)
 
 		if below_id != AIR and (
@@ -546,7 +546,7 @@ func _water_new_state(
 			return WATER
 
 	var above_id: int = _water_get(
-		position + Vector3i(0, 1, 0)
+		block_position + Vector3i(0, 1, 0)
 	)
 
 	if _is_water(above_id):
@@ -563,7 +563,7 @@ func _water_new_state(
 
 
 func _water_slope_distance(
-	position: Vector3i,
+	block_position: Vector3i,
 	incoming_direction: Vector3i,
 	depth: int,
 	cache: Dictionary
@@ -572,9 +572,9 @@ func _water_slope_distance(
 	# searches at most four blocks for a lower water hole.
 	var cache_key := (
 		"%d,%d,%d|%d,%d|%d" % [
-			position.x,
-			position.y,
-			position.z,
+			block_position.x,
+			block_position.y,
+			block_position.z,
 			incoming_direction.x,
 			incoming_direction.z,
 			depth
@@ -584,7 +584,7 @@ func _water_slope_distance(
 	if cache.has(cache_key):
 		return int(cache[cache_key])
 
-	if _water_is_hole(position):
+	if _water_is_hole(block_position):
 		cache[cache_key] = depth
 		return depth
 
@@ -605,7 +605,7 @@ func _water_slope_distance(
 			continue
 
 		var next_position: Vector3i = (
-			position + direction
+			block_position + direction
 		)
 
 		if not _water_can_pass_through(next_position):
@@ -626,7 +626,7 @@ func _water_slope_distance(
 
 
 func _water_spread_horizontal(
-	position: Vector3i,
+	block_position: Vector3i,
 	current_id: int
 ) -> void:
 	var spread_amount: int = (
@@ -654,9 +654,9 @@ func _water_spread_horizontal(
 	# when determining the shortest path, but water does not replace water.
 	for direction: Vector3i in directions:
 		var target: Vector3i = (
-			position + direction
+			block_position + direction
 		)
-		var target_id: int = _water_get(target)
+		var _target_id: int = _water_get(target)
 
 		if not _water_can_pass_through(target):
 			continue
@@ -685,7 +685,7 @@ func _water_spread_horizontal(
 
 	for direction: Vector3i in best_directions:
 		var target: Vector3i = (
-			position + direction
+			block_position + direction
 		)
 		var target_id: int = _water_get(target)
 
@@ -704,9 +704,9 @@ func _water_spread_horizontal(
 
 
 func _water_extend_falling_column(
-	position: Vector3i
+	block_position: Vector3i
 ) -> bool:
-	var cursor: Vector3i = position + Vector3i(0, -1, 0)
+	var cursor: Vector3i = block_position + Vector3i(0, -1, 0)
 	var written: int = 0
 	var limit: int = maxi(
 		1,
@@ -747,9 +747,9 @@ func _water_extend_falling_column(
 
 
 func _water_retract_falling_column(
-	position: Vector3i
+	block_position: Vector3i
 ) -> bool:
-	var cursor: Vector3i = position
+	var cursor: Vector3i = block_position
 	var removed: int = 0
 	var limit: int = maxi(
 		1,
@@ -786,12 +786,12 @@ func _water_retract_falling_column(
 
 
 func _water_process_spread(
-	position: Vector3i,
+	block_position: Vector3i,
 	current_id: int
 ) -> void:
 	# This is FlowingFluid.spread(): downward flow has absolute priority.
 	var below: Vector3i = (
-		position + Vector3i(0, -1, 0)
+		block_position + Vector3i(0, -1, 0)
 	)
 	var below_id: int = _water_get(below)
 
@@ -814,9 +814,9 @@ func _water_process_spread(
 
 			# Water may also spread sideways in the same tick after a
 			# successful downward flow when three source neighbors exist.
-			if _water_count_source_neighbors(position) >= 3:
+			if _water_count_source_neighbors(block_position) >= 3:
 				_water_spread_horizontal(
-					position,
+					block_position,
 					current_id
 				)
 			return
@@ -826,18 +826,18 @@ func _water_process_spread(
 	# water hole.
 	if (
 		current_id == WATER
-		or not _water_is_hole(position)
+		or not _water_is_hole(block_position)
 	):
 		_water_spread_horizontal(
-			position,
+			block_position,
 			current_id
 		)
 
 
 func _process_water_position(
-	position: Vector3i
+	block_position: Vector3i
 ) -> void:
-	var current: int = _water_get(position)
+	var current: int = _water_get(block_position)
 
 	# Falling water is the performance-critical vertical path. Vanilla
 	# Minecraft advances one block per fluid tick, but a long open shaft
@@ -846,18 +846,18 @@ func _process_water_position(
 	# hundreds of identical queue/lookup cycles.
 	if current == WATER_FALLING:
 		var above: int = _water_get(
-			position + Vector3i(0, 1, 0)
+			block_position + Vector3i(0, 1, 0)
 		)
 
 		if not _is_water(above):
-			_water_retract_falling_column(position)
+			_water_retract_falling_column(block_position)
 			return
 
-		if _water_extend_falling_column(position):
+		if _water_extend_falling_column(block_position):
 			return
 
 		_water_process_spread(
-			position,
+			block_position,
 			current
 		)
 		return
@@ -865,18 +865,18 @@ func _process_water_position(
 	# FlowingFluid.tick() recalculates every non-source, non-falling fluid
 	# state before spreading.
 	if current != WATER:
-		var updated_state: int = _water_new_state(position)
+		var updated_state: int = _water_new_state(block_position)
 
 		if updated_state == AIR:
 			_water_set(
-				position,
+				block_position,
 				AIR
 			)
 			return
 
 		if updated_state != current:
 			_water_set(
-				position,
+				block_position,
 				updated_state
 			)
 			current = updated_state
@@ -885,7 +885,7 @@ func _process_water_position(
 			return
 
 	_water_process_spread(
-		position,
+		block_position,
 		current
 	)
 
@@ -898,16 +898,16 @@ func _promote_scheduled_water_ticks() -> void:
 	water_schedule_buckets.erase(game_tick)
 
 	for position_variant in bucket:
-		var position: Vector3i = position_variant
+		var block_position: Vector3i = position_variant
 
-		if int(water_scheduled_ticks.get(position, -1)) != game_tick:
+		if int(water_scheduled_ticks.get(block_position, -1)) != game_tick:
 			continue
 
-		water_scheduled_ticks.erase(position)
+		water_scheduled_ticks.erase(block_position)
 
-		if not water_updates_queued.has(position):
-			water_update_queue.append(position)
-			water_updates_queued[position] = true
+		if not water_updates_queued.has(block_position):
+			water_update_queue.append(block_position)
+			water_updates_queued[block_position] = true
 
 
 func process_water_tick() -> void:
@@ -940,14 +940,14 @@ func process_water_tick() -> void:
 		):
 			break
 
-		var position: Vector3i = water_update_queue[
+		var block_position: Vector3i = water_update_queue[
 			water_update_queue_head
 		]
 		water_update_queue_head += 1
 
-		water_updates_queued.erase(position)
+		water_updates_queued.erase(block_position)
 
-		_process_water_position(position)
+		_process_water_position(block_position)
 		processed += 1
 
 	for chunk_coord in water_dirty_mesh_chunks:
@@ -968,7 +968,7 @@ func process_water_tick() -> void:
 
 
 func _water_cell_has_open_destination(
-	position: Vector3i
+	block_position: Vector3i
 ) -> bool:
 	var offsets: Array[Vector3i] = [
 		Vector3i(0, -1, 0),
@@ -979,7 +979,7 @@ func _water_cell_has_open_destination(
 	]
 
 	for offset: Vector3i in offsets:
-		if _water_get(position + offset) == AIR:
+		if _water_get(block_position + offset) == AIR:
 			return true
 
 	return false
@@ -1024,14 +1024,14 @@ func enqueue_water_updates_for_chunk(
 				if chunk.get_block(x, SEA_LEVEL, z) != WATER:
 					continue
 
-				var position := Vector3i(
+				var block_position := Vector3i(
 					chunk_coord.x * CHUNK_SIZE + x,
 					SEA_LEVEL,
 					chunk_coord.y * CHUNK_SIZE + z
 				)
 
-				if _water_cell_has_open_destination(position):
-					_water_schedule(position)
+				if _water_cell_has_open_destination(block_position):
+					_water_schedule(block_position)
 
 		return
 
@@ -1042,27 +1042,27 @@ func enqueue_water_updates_for_chunk(
 		for z in range(CHUNK_SIZE):
 			for y in range(CHUNK_HEIGHT):
 				var block_id: int = chunk.get_block(x, y, z)
-				var position := Vector3i(
+				var block_position := Vector3i(
 					chunk_coord.x * CHUNK_SIZE + x,
 					y,
 					chunk_coord.y * CHUNK_SIZE + z
 				)
 
 				if block_id == WATER_FALLING:
-					_water_schedule(position)
+					_water_schedule(block_position)
 					continue
 
 				if block_id == WATER:
 					# Only the exposed source frontier needs to wake up.
-					if _water_cell_has_open_destination(position):
-						_water_schedule(position)
+					if _water_cell_has_open_destination(block_position):
+						_water_schedule(block_position)
 					continue
 
 				if not _is_water_flowing(block_id):
 					continue
 
-				if _water_cell_has_open_destination(position):
-					_water_schedule(position)
+				if _water_cell_has_open_destination(block_position):
+					_water_schedule(block_position)
 
 
 # ===================================================================
@@ -1077,7 +1077,7 @@ var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
 
 # Scheduled fluid ticks are keyed by the exact game tick on which they
-# become eligible. A position may be rescheduled earlier; stale bucket
+# become eligible. A block_position may be rescheduled earlier; stale bucket
 # entries are ignored when they are reached.
 var water_scheduled_ticks: Dictionary = {}
 var water_schedule_buckets: Dictionary = {}
@@ -1633,13 +1633,13 @@ func _process(delta: float) -> void:
 # ===================================================================
 
 func queue_player_block_update(
-	position: Vector3,
+	block_position: Vector3,
 	block_id: int
 ) -> void:
 	# Player input may happen at any render frame, but the authoritative
 	# world mutation is applied on the next game tick.
 	var update := BlockUpdate.new()
-	update.position = position
+	update.position = block_position
 	update.block_id = block_id
 	pending_block_updates.append(update)
 
@@ -2506,7 +2506,7 @@ func load_chunk(
 func _generate_chunk_worker(
 	result: GenerationResult,
 	chunk_coordinate: Vector2i,
-	seed: int
+	generation_seed: int
 ) -> void:
 
 	result.chunk_coordinate = chunk_coordinate
@@ -2514,7 +2514,7 @@ func _generate_chunk_worker(
 	result.blocks = (
 		TERRAIN_GENERATOR.generate_chunk_data(
 			chunk_coordinate,
-			seed
+			generation_seed
 		)
 	)
 	result.terrain_ms = float(
