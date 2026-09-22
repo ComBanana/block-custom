@@ -22,6 +22,11 @@ const WATER_FALLING: int = 13
 
 const INVALID_CHUNK := Vector2i(999999, 999999)
 
+const GAME_TICKS_PER_SECOND: int = 20
+const GAME_TICK_INTERVAL: float = 1.0 / float(GAME_TICKS_PER_SECOND)
+const MAX_GAME_TICKS_PER_FRAME: int = 5
+const DEFAULT_WATER_TICK_DELAY: int = 5
+
 const PRIORITY_PLAYER: int = 0
 const PRIORITY_WATER: int = 1
 const PRIORITY_NEAR: int = 2
@@ -66,7 +71,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 @export_category("Water")
 @export var water_updates_per_tick: int = 2048
-@export var water_tick_interval: float = 0.25
+@export_range(1, 20, 1) var water_tick_delay: int = DEFAULT_WATER_TICK_DELAY
 @export var water_budget_ms: float = 2.0
 @export var water_falling_blocks_per_update: int = 8
 
@@ -116,6 +121,10 @@ class GenerationResult:
 	var chunk_coordinate: Vector2i
 	var terrain_ms: float = 0.0
 
+
+class BlockUpdate:
+	var position: Vector3
+	var block_id: int
 
 class MeshResult:
 	var chunk_coordinate: Vector2i
@@ -192,6 +201,9 @@ var generation_profiler: GenerationProfiler = GENERATION_PROFILER.new()
 var player_edit_queue: Array[Vector2i] = []
 var player_edit_queued: Dictionary = {}
 
+# World block mutations are applied on the 20 TPS simulation clock.
+var pending_block_updates: Array[BlockUpdate] = []
+
 var critical_mesh_queue: Array[Vector2i] = []
 var critical_mesh_queued: Dictionary = {}
 
@@ -265,13 +277,33 @@ func _water_block_for_amount(amount: int) -> int:
 	)
 
 
-func _water_schedule(position: Vector3i) -> void:
+func _water_schedule(
+	position: Vector3i,
+	delay_ticks: int = DEFAULT_WATER_TICK_DELAY
+) -> void:
 	if position.y < 0 or position.y >= CHUNK_HEIGHT:
 		return
 
-	if not water_updates_queued.has(position):
-		water_update_queue.append(position)
-		water_updates_queued[position] = true
+	var scheduled_tick: int = (
+		game_tick + maxi(1, delay_ticks)
+	)
+
+	var previous_tick: int = int(
+		water_scheduled_ticks.get(position, -1)
+	)
+
+	# Keep the earliest scheduled update for this water cell.
+	if previous_tick >= 0 and previous_tick <= scheduled_tick:
+		return
+
+	water_scheduled_ticks[position] = scheduled_tick
+
+	var bucket: Array[Vector3i] = water_schedule_buckets.get(
+		scheduled_tick,
+		[]
+	)
+	bucket.append(position)
+	water_schedule_buckets[scheduled_tick] = bucket
 
 
 func _water_get(position: Vector3i) -> int:
@@ -858,36 +890,43 @@ func _process_water_position(
 	)
 
 
-func process_water_queue(delta: float) -> void:
-	# Fluid simulation is a gameplay-time system. The loading screen may
-	# prepare the scheduled frontier, but it never advances or mutates water.
+func _promote_scheduled_water_ticks() -> void:
+	var bucket: Array = water_schedule_buckets.get(game_tick, [])
+	if bucket.is_empty():
+		return
+
+	water_schedule_buckets.erase(game_tick)
+
+	for position_variant in bucket:
+		var position: Vector3i = position_variant
+
+		if int(water_scheduled_ticks.get(position, -1)) != game_tick:
+			continue
+
+		water_scheduled_ticks.erase(position)
+
+		if not water_updates_queued.has(position):
+			water_update_queue.append(position)
+			water_updates_queued[position] = true
+
+
+func process_water_tick() -> void:
+	# The fluid simulation is part of the authoritative 20 TPS world tick.
+	# Loading never advances game_tick, so water cannot move before gameplay.
 	if not player_spawned:
-		water_tick_accumulator = 0.0
 		return
 
-	# Chunk load/generation/mesh processing runs before this function in
-	# _process(). Water therefore gets a small independent budget after the
-	# streaming pipeline has had its turn, instead of being able to starve
-	# or be starved indefinitely by queue depth.
-	water_tick_accumulator += delta
+	_promote_scheduled_water_ticks()
 
-	if water_tick_accumulator < water_tick_interval:
-		return
-
-	water_tick_accumulator = fmod(
-		water_tick_accumulator,
-		water_tick_interval
-	)
-
-	# Cache block lookups for the duration of this fluid tick. The cache
+	# Cache block lookups for the duration of this game tick. The cache
 	# is invalidated whenever water writes a voxel.
 	water_block_cache.clear()
 
 	var processed: int = 0
 	var budget_start_usec := Time.get_ticks_usec()
 
-	# Fluid updates created while this tick is being processed are
-	# deferred until the next tick, matching scheduled-fluid behavior.
+	# Fluid updates created while this tick is being processed are deferred
+	# until their own scheduled game tick.
 	var tick_queue_end: int = water_update_queue.size()
 
 	while (
@@ -911,7 +950,6 @@ func process_water_queue(delta: float) -> void:
 		_process_water_position(position)
 		processed += 1
 
-	# Water visual refreshes are prioritized above background streaming meshes.
 	for chunk_coord in water_dirty_mesh_chunks:
 		enqueue_water_mesh_chunk(chunk_coord)
 	water_dirty_mesh_chunks.clear()
@@ -1037,9 +1075,18 @@ var collision_queued: Dictionary = {}
 var water_update_queue: Array[Vector3i] = []
 var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
+
+# Scheduled fluid ticks are keyed by the exact game tick on which they
+# become eligible. A position may be rescheduled earlier; stale bucket
+# entries are ignored when they are reached.
+var water_scheduled_ticks: Dictionary = {}
+var water_schedule_buckets: Dictionary = {}
+
 var water_dirty_mesh_chunks: Dictionary = {}
 var water_block_cache: Dictionary = {}
-var water_tick_accumulator: float = 0.0
+
+var game_tick: int = 0
+var game_tick_accumulator: float = 0.0
 
 
 # ===================================================================
@@ -1565,11 +1612,9 @@ func _process(delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 
-	# Gameplay water runs before mesh processing so a fluid tick can
-	# enqueue its visual refreshes in the same frame. During the data-only
-	# loading phase, water remains completely inert.
-	if player_spawned:
-		process_water_queue(delta)
+	# Gameplay simulation is fixed at 20 ticks per second. Rendering and
+	# asynchronous chunk workers remain frame/worker driven independently.
+	process_game_ticks(delta)
 
 	process_mesh_queue()
 	process_collision_queue()
@@ -1581,6 +1626,69 @@ func _process(delta: float) -> void:
 		else:
 			update_loading_progress()
 			try_spawn_player()
+
+
+# ===================================================================
+# Fixed 20 TPS world simulation
+# ===================================================================
+
+func queue_player_block_update(
+	position: Vector3,
+	block_id: int
+) -> void:
+	# Player input may happen at any render frame, but the authoritative
+	# world mutation is applied on the next game tick.
+	var update := BlockUpdate.new()
+	update.position = position
+	update.block_id = block_id
+	pending_block_updates.append(update)
+
+
+func process_block_update_tick() -> void:
+	var tick_queue_end: int = pending_block_updates.size()
+	var processed: int = 0
+
+	while processed < tick_queue_end:
+		if pending_block_updates.is_empty():
+			return
+
+		var update: BlockUpdate = pending_block_updates.pop_front()
+		set_block_world(update.position, update.block_id)
+		processed += 1
+
+
+func process_game_tick() -> void:
+	game_tick += 1
+
+	# Block changes happen first, then fluid ticks react to the resulting
+	# block states in the same authoritative game tick.
+	process_block_update_tick()
+	process_water_tick()
+
+
+func process_game_ticks(delta: float) -> void:
+	if not player_spawned:
+		game_tick_accumulator = 0.0
+		return
+
+	game_tick_accumulator += delta
+
+	var ticks_run: int = 0
+
+	while (
+		game_tick_accumulator >= GAME_TICK_INTERVAL
+		and ticks_run < MAX_GAME_TICKS_PER_FRAME
+	):
+		game_tick_accumulator -= GAME_TICK_INTERVAL
+		process_game_tick()
+		ticks_run += 1
+
+	# Avoid an extended frame-time spike causing an unbounded catch-up loop.
+	if ticks_run >= MAX_GAME_TICKS_PER_FRAME:
+		game_tick_accumulator = minf(
+			game_tick_accumulator,
+			GAME_TICK_INTERVAL
+		)
 
 
 # ===================================================================
