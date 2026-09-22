@@ -47,7 +47,7 @@ func _execute_time(
 			"message": "Usage: /time set <sunrise|day|noon|evening|sunset|night|midnight>"
 		}
 
-	var preset := args[1].to_lower()
+	var preset: String = args[1].to_lower()
 
 	if not world.set_time_preset(preset):
 		return {
