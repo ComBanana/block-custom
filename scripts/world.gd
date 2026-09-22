@@ -63,7 +63,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var collision_distance: int = 2
 
 @export_category("Water")
-@export var water_updates_per_frame: int = 64
+@export var water_updates_per_tick: int = 512
 @export var water_tick_interval: float = 0.25
 
 
@@ -277,6 +277,34 @@ func _water_schedule_changed(position: Vector3i) -> void:
 	_water_schedule_neighbors(position)
 
 
+func _water_mark_mesh_dirty(position: Vector3i) -> void:
+	var chunk_coord := world_to_chunk(
+		Vector3(position.x, position.y, position.z)
+	)
+	water_dirty_mesh_chunks[chunk_coord] = true
+
+	var local_x := posmod(position.x, CHUNK_SIZE)
+	var local_z := posmod(position.z, CHUNK_SIZE)
+
+	if local_x == 0:
+		water_dirty_mesh_chunks[
+			chunk_coord + Vector2i(-1, 0)
+		] = true
+	elif local_x == CHUNK_SIZE - 1:
+		water_dirty_mesh_chunks[
+			chunk_coord + Vector2i(1, 0)
+		] = true
+
+	if local_z == 0:
+		water_dirty_mesh_chunks[
+			chunk_coord + Vector2i(0, -1)
+		] = true
+	elif local_z == CHUNK_SIZE - 1:
+		water_dirty_mesh_chunks[
+			chunk_coord + Vector2i(0, 1)
+		] = true
+
+
 func _water_set(
 	position: Vector3i,
 	block_id: int
@@ -293,6 +321,7 @@ func _water_set(
 		block_id,
 		false,
 		false,
+		false,
 		false
 	)
 
@@ -301,6 +330,7 @@ func _water_set(
 	if _water_get(position) != block_id:
 		return false
 
+	_water_mark_mesh_dirty(position)
 	_water_schedule_changed(position)
 	return true
 
@@ -523,12 +553,13 @@ func process_water_queue(delta: float) -> void:
 	var processed: int = 0
 
 	while (
-		processed < water_updates_per_frame
-		and not water_update_queue.is_empty()
+		processed < water_updates_per_tick
+		and water_update_queue_head < water_update_queue.size()
 	):
-		var position: Vector3i = (
-			water_update_queue.pop_front()
-		)
+		var position: Vector3i = water_update_queue[
+			water_update_queue_head
+		]
+		water_update_queue_head += 1
 
 		water_updates_queued.erase(
 			position
@@ -536,6 +567,21 @@ func process_water_queue(delta: float) -> void:
 
 		_process_water_position(position)
 		processed += 1
+
+	# Refresh each affected chunk at most once per water tick.
+	for chunk_coord in water_dirty_mesh_chunks:
+		enqueue_mesh_chunk(chunk_coord)
+	water_dirty_mesh_chunks.clear()
+
+	# Keep queue removal O(1) while avoiding an ever-growing backing array.
+	if water_update_queue_head >= water_update_queue.size():
+		water_update_queue.clear()
+		water_update_queue_head = 0
+	elif water_update_queue_head >= 1024 and water_update_queue_head * 2 >= water_update_queue.size():
+		water_update_queue = water_update_queue.slice(
+			water_update_queue_head
+		)
+		water_update_queue_head = 0
 
 
 func _water_cell_has_open_destination(
@@ -626,7 +672,9 @@ var collision_queue: Array[Vector2i] = []
 var collision_queued: Dictionary = {}
 
 var water_update_queue: Array[Vector3i] = []
+var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
+var water_dirty_mesh_chunks: Dictionary = {}
 var water_tick_accumulator: float = 0.0
 
 
@@ -2862,7 +2910,8 @@ func set_block_world(
 	block_id: int,
 	schedule_water: bool = true,
 	record_statistics: bool = true,
-	prioritize_player_edit: bool = true
+	prioritize_player_edit: bool = true,
+	update_mesh: bool = true
 ) -> void:
 
 	var chunk_coord := world_to_chunk(
@@ -2928,17 +2977,17 @@ func set_block_world(
 		elif old_block_id == AIR and block_id != AIR:
 			blocks_placed += 1
 
-	if prioritize_player_edit:
-		enqueue_player_edit(
-			chunk_coord
-		)
-	else:
-		# Water updates should refresh the normal mesh queue instead of
-		# using the player-edit queue, which cancels background mesh work
-		# and can cause large bursts of redundant remeshing.
-		enqueue_mesh_chunk(
-			chunk_coord
-		)
+	if update_mesh:
+		if prioritize_player_edit:
+			enqueue_player_edit(
+				chunk_coord
+			)
+		else:
+			# Non-player systems can request normal-priority mesh work
+			# without stealing the player-edit queue.
+			enqueue_mesh_chunk(
+				chunk_coord
+			)
 
 	if schedule_water:
 		var changed := Vector3i(
