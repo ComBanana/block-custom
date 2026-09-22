@@ -63,8 +63,9 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var collision_distance: int = 2
 
 @export_category("Water")
-@export var water_updates_per_tick: int = 512
+@export var water_updates_per_tick: int = 2048
 @export var water_tick_interval: float = 0.25
+@export var water_budget_ms: float = 2.0
 
 
 var terrain_noise := FastNoiseLite.new()
@@ -271,10 +272,23 @@ func _water_get(position: Vector3i) -> int:
 
 
 func _water_schedule_changed(position: Vector3i) -> void:
-	# Fluid simulation is event-driven: only the changed cell and
-	# its immediate neighbors need to be reconsidered.
+	# Event-driven fluid scheduling: the changed cell is always relevant,
+	# but only adjacent water cells need to be reconsidered. Scheduling
+	# surrounding AIR cells caused large water bodies to create enormous
+	# queues of positions that could never change.
 	_water_schedule(position)
-	_water_schedule_neighbors(position)
+
+	for offset in [
+		Vector3i(0, -1, 0),
+		Vector3i(0, 1, 0),
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]:
+		var neighbor := position + offset
+		if _is_water(_water_get(neighbor)):
+			_water_schedule(neighbor)
 
 
 func _water_mark_mesh_dirty(position: Vector3i) -> void:
@@ -682,30 +696,27 @@ func _process_water_position(
 	):
 		current = WATER
 
-	if current == WATER:
-		_water_process_source(position)
+	if not _is_water(current):
 		return
 
-	if current == WATER_FALLING:
-		var below_falling := _water_get(
-			position + Vector3i(0, -1, 0)
-		)
+	# Java Edition resolves the fluid state first, then attempts the
+	# downward spread. This also turns a falling stream back into a
+	# normal flowing level when it no longer has water above it.
+	if current != WATER:
+		var updated_state := _water_new_state(position)
 
-		if below_falling == AIR:
-			_water_set(
-				position + Vector3i(0, -1, 0),
-				WATER_FALLING
-			)
+		if updated_state == AIR:
+			_water_set(position, AIR)
 			return
 
-		# Falling water can feed a horizontal flow when it reaches a
-		# surface, while retaining its falling state as in Java Edition.
-		_water_spread_horizontal(position, WATER_FALLING)
-		return
+		if updated_state != current:
+			_water_set(position, updated_state)
+			current = updated_state
 
-	if not _is_water_flowing(current):
-		return
-
+	# Minecraft always prefers downward flow. Horizontal spread is
+	# considered only after the downward path is blocked. When water
+	# does successfully flow downward, three or more horizontal source
+	# neighbors are required before that same cell also spreads sideways.
 	var below_position := position + Vector3i(0, -1, 0)
 	var below := _water_get(below_position)
 
@@ -714,19 +725,12 @@ func _process_water_position(
 			below_position,
 			WATER_FALLING
 		)
-		return
 
-	var updated_state := _water_new_state(position)
-
-	if updated_state == AIR:
-		_water_set(position, AIR)
-		return
-
-	if updated_state != current:
-		_water_set(position, updated_state)
-		if updated_state == WATER:
+		if _water_count_source_neighbors(position) < 3:
 			return
-		current = updated_state
+
+		_water_spread_horizontal(position, current)
+		return
 
 	_water_spread_horizontal(position, current)
 
@@ -743,6 +747,8 @@ func process_water_queue(delta: float) -> void:
 	)
 
 	var processed: int = 0
+	var budget_start_usec := Time.get_ticks_usec()
+
 	# Fluid updates created while this tick is being processed are
 	# deferred until the next tick, matching Minecraft's scheduled
 	# fluid-tick behavior.
@@ -752,6 +758,12 @@ func process_water_queue(delta: float) -> void:
 		processed < water_updates_per_tick
 		and water_update_queue_head < tick_queue_end
 	):
+		if (
+			processed > 0
+			and water_budget_ms > 0.0
+			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= water_budget_ms
+		):
+			break
 		var position: Vector3i = water_update_queue[
 			water_update_queue_head
 		]
