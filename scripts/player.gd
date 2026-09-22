@@ -38,8 +38,22 @@ extends CharacterBody3D
 @export var water_edge_jump_velocity_per_tick: float = 0.45
 
 const AIR: int = 0
+const GRASS: int = 1
+const DIRT: int = 2
+const STONE: int = 3
+const SAND: int = 4
 const WATER: int = 5
 const WATER_FALLING: int = 13
+
+const HOTBAR_BLOCKS: Array[int] = [
+	GRASS,
+	DIRT,
+	STONE,
+	SAND,
+	WATER
+]
+
+var selected_hotbar_slot: int = 0
 
 
 # =========================
@@ -508,16 +522,47 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_pressed() and not event.is_echo():
 		for slot in range(1, 10):
 			if event.is_action_pressed("hotbar_%d" % slot):
-				match slot:
-					1:
-						world.selected_block = 1
-					2:
-						world.selected_block = WATER
-					_:
-						world.selected_block = 0
+				select_hotbar_slot(slot - 1)
 				get_viewport().set_input_as_handled()
-				break
+				return
 
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				select_hotbar_slot(
+					posmod(selected_hotbar_slot - 1, HOTBAR_BLOCKS.size())
+				)
+				get_viewport().set_input_as_handled()
+				return
+
+			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				select_hotbar_slot(
+					posmod(selected_hotbar_slot + 1, HOTBAR_BLOCKS.size())
+				)
+				get_viewport().set_input_as_handled()
+				return
+
+
+
+func select_hotbar_slot(slot_index: int) -> void:
+	if HOTBAR_BLOCKS.is_empty():
+		return
+
+	selected_hotbar_slot = clampi(
+		slot_index,
+		0,
+		HOTBAR_BLOCKS.size() - 1
+	)
+	world.selected_block = HOTBAR_BLOCKS[selected_hotbar_slot]
+
+
+func get_hotbar_slot_count() -> int:
+	return HOTBAR_BLOCKS.size()
+
+
+func get_hotbar_block(slot_index: int) -> int:
+	if slot_index < 0 or slot_index >= HOTBAR_BLOCKS.size():
+		return AIR
+	return HOTBAR_BLOCKS[slot_index]
 
 
 func _is_water_block(block_id: int) -> bool:
