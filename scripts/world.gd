@@ -736,6 +736,10 @@ func _water_retract_falling_column(
 	var bottom: Vector3i = cursor
 	if _is_water(_water_get(bottom)):
 		_water_schedule(bottom)
+	elif _water_get(bottom) == WATER_FALLING:
+		# More falling cells remain below the batch. Wake the new top
+		# frontier so retraction continues on the next fluid tick.
+		_water_schedule(bottom)
 
 	return true
 
