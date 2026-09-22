@@ -7,6 +7,27 @@ size = Vector3(0.7, 1.8, 0.7)
 
 [node name="Player" type="CharacterBody3D" unique_id=282764273]
 script = ExtResource("1_p0vlq")
+walk_speed = null
+sprint_speed = null
+jump_velocity = null
+gravity = null
+crouch_speed = null
+ground_acceleration = null
+ground_friction = null
+air_acceleration = null
+water_acceleration_per_tick = null
+water_gravity_per_tick = null
+water_jump_impulse_per_tick = null
+water_sneak_impulse_per_tick = null
+water_normal_drag = null
+water_swim_drag = null
+water_vertical_drag = null
+water_fluid_jump_threshold = null
+water_edge_jump_velocity_per_tick = null
+mouse_sensitivity = null
+sprint_fov_multiplier = null
+fov_change_speed = null
+camera_transition_speed = null
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=583396595]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)

@@ -4,6 +4,7 @@
 [ext_resource type="Script" uid="uid://c5ol4prxkmv3p" path="res://scripts/world.gd" id="3_0bbpv"]
 [ext_resource type="Script" uid="uid://dl1eytg3vi5b7" path="res://scripts/hud.gd" id="3_rarhs"]
 [ext_resource type="Script" uid="uid://cf1oh6mm6po" path="res://scripts/loading_screen.gd" id="4_vcsgt"]
+[ext_resource type="Texture2D" uid="uid://doybihnefmmiy" path="res://textures/dirt.png" id="5_c01mt"]
 [ext_resource type="Script" uid="uid://bsjemod2nujiv" path="res://scripts/pause_menu.gd" id="6_c01mt"]
 [ext_resource type="Texture2D" uid="uid://d22t1sc2evdm0" path="res://textures/run-icon.png" id="7_runicon"]
 [ext_resource type="Script" uid="uid://403iueody0us" path="res://scripts/chat.gd" id="8_chat"]
@@ -23,9 +24,6 @@ sky = SubResource("Sky_0bbpv")
 ambient_light_source = 2
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_sky_contribution = 0.0
-
-[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_nxtc6"]
-load_path = "res://.godot/imported/dirt.png-8f3447f5703c4d1ffe16a06c7c96ba03.ctex"
 
 [node name="Main" type="Node3D" unique_id=816244598]
 
@@ -48,23 +46,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 8)
 
 [node name="World" type="Node3D" parent="." unique_id=983543485]
 script = ExtResource("3_0bbpv")
-render_distance = null
-spawn_load_radius = null
-loading_generation_boost = null
-loading_mesh_boost = null
-loading_mesh_apply_boost = null
-loading_collision_boost = null
-chunks_loaded_per_frame = null
-max_generation_tasks = null
-max_mesh_tasks = null
-mesh_columns_per_frame = null
-mesh_budget_ms = null
-max_mesh_chunks_per_frame = null
-collisions_per_frame = null
-critical_chunk_distance = null
-collision_distance = null
-water_updates_per_frame = null
-water_tick_interval = null
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1375384716]
 script = ExtResource("3_rarhs")
@@ -166,7 +147,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("8_chat")
 
-[node name="Messages" type="VBoxContainer" parent="HUD/Chat" unique_id=606578416]
+[node name="Messages" type="VBoxContainer" parent="HUD/Chat" unique_id=58885436]
 layout_mode = 0
 anchor_top = 1.0
 anchor_bottom = 1.0
@@ -178,7 +159,7 @@ grow_vertical = 0
 theme_override_constants/separation = 2
 alignment = 2
 
-[node name="ChatHistoryPanel" type="PanelContainer" parent="HUD/Chat" unique_id=1974724809]
+[node name="ChatHistoryPanel" type="PanelContainer" parent="HUD/Chat" unique_id=1281273099]
 visible = false
 layout_mode = 0
 anchor_top = 1.0
@@ -190,18 +171,18 @@ offset_bottom = -110.0
 grow_vertical = 0
 mouse_filter = 2
 
-[node name="Scroll" type="ScrollContainer" parent="HUD/Chat/ChatHistoryPanel" unique_id=578651131]
+[node name="Scroll" type="ScrollContainer" parent="HUD/Chat/ChatHistoryPanel" unique_id=1827267165]
 layout_mode = 2
 horizontal_scroll_mode = 0
 
-[node name="HistoryMessages" type="VBoxContainer" parent="HUD/Chat/ChatHistoryPanel/Scroll" unique_id=1397340076]
+[node name="HistoryMessages" type="VBoxContainer" parent="HUD/Chat/ChatHistoryPanel/Scroll" unique_id=602940421]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 2
 alignment = 2
 
-[node name="ChatInputPanel" type="PanelContainer" parent="HUD/Chat" unique_id=1150176074]
+[node name="ChatInputPanel" type="PanelContainer" parent="HUD/Chat" unique_id=1362261709]
 visible = false
 layout_mode = 0
 anchor_top = 1.0
@@ -212,14 +193,14 @@ offset_right = 650.0
 offset_bottom = -64.0
 grow_vertical = 0
 
-[node name="Margin" type="MarginContainer" parent="HUD/Chat/ChatInputPanel" unique_id=1408048999]
+[node name="Margin" type="MarginContainer" parent="HUD/Chat/ChatInputPanel" unique_id=1116226477]
 layout_mode = 2
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 4
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 4
 
-[node name="ChatInput" type="LineEdit" parent="HUD/Chat/ChatInputPanel/Margin" unique_id=1246621588]
+[node name="ChatInput" type="LineEdit" parent="HUD/Chat/ChatInputPanel/Margin" unique_id=1613299039]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 placeholder_text = "Type a message..."
@@ -262,7 +243,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-texture = SubResource("CompressedTexture2D_nxtc6")
+texture = ExtResource("5_c01mt")
 expand_mode = 1
 stretch_mode = 1
 
@@ -362,7 +343,7 @@ custom_minimum_size = Vector2(300, 50)
 layout_mode = 2
 text = "Main Menu"
 
-[node name="StatisticsCenter" type="CenterContainer" parent="PauseLayer/PauseMenu" unique_id=321009621]
+[node name="StatisticsCenter" type="CenterContainer" parent="PauseLayer/PauseMenu" unique_id=1244692472]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -371,93 +352,93 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="StatisticsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/StatisticsCenter" unique_id=190315238]
+[node name="StatisticsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/StatisticsCenter" unique_id=1471524699]
 custom_minimum_size = Vector2(450, 360)
 layout_mode = 2
 
-[node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel" unique_id=752688632]
+[node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel" unique_id=41394965]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1983715655]
+[node name="Title" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=321837934]
 layout_mode = 2
 theme_override_font_sizes/font_size = 28
 text = "Statistics"
 horizontal_alignment = 1
 
-[node name="WorldRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1571590150]
+[node name="WorldRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1490680467]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow" unique_id=48865156]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow" unique_id=2035738304]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "World"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow" unique_id=1050620376]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/WorldRow" unique_id=1034385071]
 layout_mode = 2
 text = "World"
 
-[node name="SeedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1268761545]
+[node name="SeedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1735822578]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow" unique_id=908058371]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow" unique_id=48271407]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Seed"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow" unique_id=559093675]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/SeedRow" unique_id=1702740762]
 layout_mode = 2
 text = "0"
 
-[node name="PlayTimeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=90439086]
+[node name="PlayTimeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=2005593982]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow" unique_id=2015413569]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow" unique_id=541322528]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Play Time"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow" unique_id=964355298]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/PlayTimeRow" unique_id=609026983]
 layout_mode = 2
 text = "0m 0s"
 
-[node name="DistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=588065422]
+[node name="DistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1108053668]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow" unique_id=1287744314]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow" unique_id=1207201114]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Distance"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow" unique_id=763347605]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/DistanceRow" unique_id=107201731]
 layout_mode = 2
 text = "0.0 blocks"
 
-[node name="BlocksBrokenRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=439683762]
+[node name="BlocksBrokenRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=629599155]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow" unique_id=509183019]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow" unique_id=408595637]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Blocks Broken"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow" unique_id=951830553]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksBrokenRow" unique_id=534266147]
 layout_mode = 2
 text = "0"
 
-[node name="BlocksPlacedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=394740497]
+[node name="BlocksPlacedRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=1224457120]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow" unique_id=705766145]
+[node name="Label" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow" unique_id=912074502]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Blocks Placed"
 
-[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow" unique_id=360318790]
+[node name="Value" type="Label" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content/BlocksPlacedRow" unique_id=1827290285]
 layout_mode = 2
 text = "0"
 
-[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=2114628553]
+[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/StatisticsCenter/StatisticsPanel/Content" unique_id=887763513]
 custom_minimum_size = Vector2(300, 50)
 layout_mode = 2
 text = "Back"
@@ -472,7 +453,7 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="SettingsPanel" type="PanelContainer" parent="PauseLayer/PauseMenu/SettingsCenter" unique_id=955647223]
-custom_minimum_size = Vector2(450, 560)
+custom_minimum_size = Vector2(450, 420)
 layout_mode = 2
 
 [node name="Content" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel" unique_id=1168816740]
@@ -485,88 +466,87 @@ theme_override_font_sizes/font_size = 28
 text = "Settings"
 horizontal_alignment = 1
 
-[node name="CategoryButtons" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=848735837]
+[node name="CategoryButtons" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1833963235]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="VideoButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons" unique_id=196058228]
+[node name="VideoButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons" unique_id=354214557]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Video"
 
-[node name="ControlsButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons" unique_id=1166392155]
+[node name="ControlsButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/CategoryButtons" unique_id=1979565209]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Controls"
 
-[node name="VideoOptions" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1876556650]
+[node name="VideoOptions" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1039334646]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="RenderDistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=2031637396]
+[node name="RenderDistanceRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=1227034531]
 layout_mode = 2
 
-[node name="RenderDistanceLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceRow" unique_id=1666143108]
+[node name="RenderDistanceLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceRow" unique_id=1138827563]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Render Distance"
 
-[node name="RenderDistanceValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceRow" unique_id=1033380463]
+[node name="RenderDistanceValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/RenderDistanceRow" unique_id=649054880]
 layout_mode = 2
 text = "12"
 
-[node name="RenderDistanceSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=1163640174]
+[node name="RenderDistanceSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=2108930809]
 custom_minimum_size = Vector2(400, 30)
 layout_mode = 2
 min_value = 2.0
 max_value = 64.0
 value = 12.0
 
-[node name="FOVRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=312938893]
+[node name="FOVRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=1258967132]
 layout_mode = 2
 
-[node name="FOVLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVRow" unique_id=1649023085]
+[node name="FOVLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVRow" unique_id=749841363]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Field of View"
 
-[node name="FOVValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVRow" unique_id=1549453899]
+[node name="FOVValue" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/FOVRow" unique_id=18407332]
 layout_mode = 2
 text = "75"
 
-[node name="FOVSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=1219242032]
+[node name="FOVSlider" type="HSlider" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=142075982]
 custom_minimum_size = Vector2(400, 30)
 layout_mode = 2
 min_value = 20.0
 max_value = 120.0
 value = 75.0
 
-[node name="FogButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=300366953]
+<<<<<<< Updated upstream
+[node name="FogButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "Fog: ON"
 
-[node name="ViewBobbingButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=918224013]
+[node name="ViewBobbingButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "View Bobbing: ON"
 
-[node name="LightShadersButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=1824292048]
-custom_minimum_size = Vector2(400, 48)
-layout_mode = 2
-text = "Light Shaders: ON"
-
-[node name="WindowModeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=169289431]
+[node name="WindowModeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions"]
+=======
+[node name="WindowModeRow" type="HBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions" unique_id=736590926]
+>>>>>>> Stashed changes
 layout_mode = 2
 
-[node name="WindowModeLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/WindowModeRow" unique_id=1144210065]
+[node name="WindowModeLabel" type="Label" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/WindowModeRow" unique_id=1678638378]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Window Mode"
 
-[node name="WindowModeOption" type="OptionButton" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/WindowModeRow" unique_id=465718974]
+[node name="WindowModeOption" type="OptionButton" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/VideoOptions/WindowModeRow" unique_id=1197330510]
 layout_mode = 2
 item_count = 2
 popup/item_0/text = "Windowed"
@@ -574,27 +554,31 @@ popup/item_0/id = 0
 popup/item_1/text = "Fullscreen"
 popup/item_1/id = 1
 
-[node name="ControlsOptions" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1608221086]
+[node name="ControlsOptions" type="VBoxContainer" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1477974758]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="ToggleSprintButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions" unique_id=3258864]
+[node name="ToggleSprintButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions" unique_id=1161977703]
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "Toggle Sprint: OFF"
 
-[node name="ToggleCrouchButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions" unique_id=313992363]
+[node name="ToggleCrouchButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions" unique_id=665061490]
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "Toggle Crouch: OFF"
 
-[node name="KeybindsButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions" unique_id=949608054]
+<<<<<<< Updated upstream
+[node name="KeybindsButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content/ControlsOptions"]
 custom_minimum_size = Vector2(400, 48)
 layout_mode = 2
 text = "Keybinds"
 
-[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=1742605567]
+[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content"]
+=======
+[node name="BackButton" type="Button" parent="PauseLayer/PauseMenu/SettingsCenter/SettingsPanel/Content" unique_id=64993547]
+>>>>>>> Stashed changes
 custom_minimum_size = Vector2(300, 50)
 layout_mode = 2
 text = "Back"
