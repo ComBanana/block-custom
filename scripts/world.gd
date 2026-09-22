@@ -285,6 +285,7 @@ func _water_set(
 		),
 		block_id,
 		false,
+		false,
 		false
 	)
 
@@ -2858,7 +2859,8 @@ func set_block_world(
 	world_position: Vector3,
 	block_id: int,
 	schedule_water: bool = true,
-	record_statistics: bool = true
+	record_statistics: bool = true,
+	prioritize_player_edit: bool = true
 ) -> void:
 
 	var chunk_coord := world_to_chunk(
@@ -2924,9 +2926,17 @@ func set_block_world(
 		elif old_block_id == AIR and block_id != AIR:
 			blocks_placed += 1
 
-	enqueue_player_edit(
-		chunk_coord
-	)
+	if prioritize_player_edit:
+		enqueue_player_edit(
+			chunk_coord
+		)
+	else:
+		# Water updates should refresh the normal mesh queue instead of
+		# using the player-edit queue, which cancels background mesh work
+		# and can cause large bursts of redundant remeshing.
+		enqueue_mesh_chunk(
+			chunk_coord
+		)
 
 	if schedule_water:
 		var changed := Vector3i(
@@ -2939,23 +2949,42 @@ func set_block_world(
 		_water_schedule_neighbors(changed)
 
 	# Update neighboring chunks when an edit is on a chunk boundary.
-	if local_x == 0:
-		enqueue_player_edit(
-			chunk_coord + Vector2i(-1, 0)
-		)
-	elif local_x == CHUNK_SIZE - 1:
-		enqueue_player_edit(
-			chunk_coord + Vector2i(1, 0)
-		)
+	if prioritize_player_edit:
+		if local_x == 0:
+			enqueue_player_edit(
+				chunk_coord + Vector2i(-1, 0)
+			)
+		elif local_x == CHUNK_SIZE - 1:
+			enqueue_player_edit(
+				chunk_coord + Vector2i(1, 0)
+			)
 
-	if local_z == 0:
-		enqueue_player_edit(
-			chunk_coord + Vector2i(0, -1)
-		)
-	elif local_z == CHUNK_SIZE - 1:
-		enqueue_player_edit(
-			chunk_coord + Vector2i(0, 1)
-		)
+		if local_z == 0:
+			enqueue_player_edit(
+				chunk_coord + Vector2i(0, -1)
+			)
+		elif local_z == CHUNK_SIZE - 1:
+			enqueue_player_edit(
+				chunk_coord + Vector2i(0, 1)
+			)
+	else:
+		if local_x == 0:
+			enqueue_mesh_chunk(
+				chunk_coord + Vector2i(-1, 0)
+			)
+		elif local_x == CHUNK_SIZE - 1:
+			enqueue_mesh_chunk(
+				chunk_coord + Vector2i(1, 0)
+			)
+
+		if local_z == 0:
+			enqueue_mesh_chunk(
+				chunk_coord + Vector2i(0, -1)
+			)
+		elif local_z == CHUNK_SIZE - 1:
+			enqueue_mesh_chunk(
+				chunk_coord + Vector2i(0, 1)
+			)
 
 
 func get_statistics() -> Dictionary:
