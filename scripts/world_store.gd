@@ -67,7 +67,11 @@ static func sanitize_world_name(world_name: String) -> String:
 		var code := character.unicode_at(0)
 		if code < 32:
 			continue
-		if character in ["<", ">", ":", """, "/", "\\", "|", "?", "*"]:
+		if (
+			character in ["<", ">", ":", "/", "|", "?", "*"]
+			or code == 34
+			or code == 92
+		):
 			continue
 		cleaned += character
 
