@@ -286,7 +286,7 @@ func _water_schedule_changed(position: Vector3i) -> void:
 		Vector3i(0, 0, -1),
 		Vector3i(0, 0, 1)
 	]:
-		var neighbor := position + offset
+		var neighbor: Vector3i = position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
 
