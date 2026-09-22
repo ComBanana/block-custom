@@ -2313,7 +2313,8 @@ func _build_mesh_worker(
 		result.neg_x_blocks,
 		result.pos_x_blocks,
 		result.neg_z_blocks,
-		result.pos_z_blocks
+		result.pos_z_blocks,
+		result.chunk_coordinate
 	)
 	result.mesh_ms = float(
 		Time.get_ticks_usec() - start_usec
