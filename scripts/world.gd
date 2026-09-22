@@ -1789,6 +1789,13 @@ func load_chunk(
 		if was_legacy_format:
 			dirty_chunks[chunk_coord] = true
 
+		# Restart the saved water simulation from existing source blocks.
+		# Only source cells at sea level are queued, then normal water logic
+		# propagates the update outward without creating a large backlog.
+		enqueue_water_updates_for_chunk(
+			chunk_coord
+		)
+
 		enqueue_mesh_chunk(chunk_coord)
 		enqueue_neighbor_meshes(chunk_coord)
 		return
