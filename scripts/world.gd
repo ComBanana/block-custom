@@ -743,10 +743,14 @@ func process_water_queue(delta: float) -> void:
 	)
 
 	var processed: int = 0
+	# Fluid updates created while this tick is being processed are
+	# deferred until the next tick, matching Minecraft's scheduled
+	# fluid-tick behavior.
+	var tick_queue_end: int = water_update_queue.size()
 
 	while (
 		processed < water_updates_per_tick
-		and water_update_queue_head < water_update_queue.size()
+		and water_update_queue_head < tick_queue_end
 	):
 		var position: Vector3i = water_update_queue[
 			water_update_queue_head
