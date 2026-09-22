@@ -867,26 +867,26 @@ func _has_urgent_streaming_work() -> bool:
 	# from taking main-thread time while the player is waiting for nearby
 	# terrain to become usable.
 	for chunk_coord in load_queue:
-		var dx := abs(chunk_coord.x - player_chunk.x)
-		var dz := abs(chunk_coord.y - player_chunk.y)
+		var dx: int = abs(chunk_coord.x - player_chunk.x)
+		var dz: int = abs(chunk_coord.y - player_chunk.y)
 		if dx <= focus_radius and dz <= focus_radius:
 			return true
 
 	for chunk_coord in critical_generation_queue:
-		var dx := abs(chunk_coord.x - player_chunk.x)
-		var dz := abs(chunk_coord.y - player_chunk.y)
+		var dx: int = abs(chunk_coord.x - player_chunk.x)
+		var dz: int = abs(chunk_coord.y - player_chunk.y)
 		if dx <= focus_radius and dz <= focus_radius:
 			return true
 
 	for chunk_coord in critical_mesh_queue:
-		var dx := abs(chunk_coord.x - player_chunk.x)
-		var dz := abs(chunk_coord.y - player_chunk.y)
+		var dx: int = abs(chunk_coord.x - player_chunk.x)
+		var dz: int = abs(chunk_coord.y - player_chunk.y)
 		if dx <= focus_radius and dz <= focus_radius:
 			return true
 
 	for chunk_coord in near_mesh_queue:
-		var dx := abs(chunk_coord.x - player_chunk.x)
-		var dz := abs(chunk_coord.y - player_chunk.y)
+		var dx: int = abs(chunk_coord.x - player_chunk.x)
+		var dz: int = abs(chunk_coord.y - player_chunk.y)
 		if dx <= focus_radius and dz <= focus_radius:
 			return true
 
@@ -996,8 +996,8 @@ func enqueue_water_updates_for_chunk(
 			0,
 			spawn_load_radius
 		)
-		var startup_dx := abs(chunk_coord.x - player_chunk.x)
-		var startup_dz := abs(chunk_coord.y - player_chunk.y)
+		var startup_dx: int = abs(chunk_coord.x - player_chunk.x)
+		var startup_dz: int = abs(chunk_coord.y - player_chunk.y)
 
 		if (
 			startup_dx > startup_radius
