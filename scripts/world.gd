@@ -270,6 +270,13 @@ func _water_get(position: Vector3i) -> int:
 	)
 
 
+func _water_schedule_changed(position: Vector3i) -> void:
+	# Fluid simulation is event-driven: only the changed cell and
+	# its immediate neighbors need to be reconsidered.
+	_water_schedule(position)
+	_water_schedule_neighbors(position)
+
+
 func _water_set(
 	position: Vector3i,
 	block_id: int
@@ -289,6 +296,12 @@ func _water_set(
 		false
 	)
 
+	# A failed write can happen when a target chunk is not loaded.
+	# Do not keep an unloaded position alive in the fluid queue.
+	if _water_get(position) != block_id:
+		return false
+
+	_water_schedule_changed(position)
 	return true
 
 
@@ -415,8 +428,6 @@ func _water_spread_horizontal(
 
 		if target_id == AIR:
 			_water_set(target, next_block)
-			_water_schedule(target)
-			_water_schedule_neighbors(target)
 			continue
 
 		if _is_water_flowing(target_id):
@@ -426,8 +437,6 @@ func _water_spread_horizontal(
 
 			if target_level > next_level:
 				_water_set(target, next_block)
-				_water_schedule(target)
-				_water_schedule_neighbors(target)
 
 
 func _process_water_position(
@@ -461,8 +470,6 @@ func _process_water_position(
 			below_position,
 			WATER_FALLING
 		)
-		_water_schedule(below_position)
-		_water_schedule_neighbors(below_position)
 		return
 
 	# Falling water becomes ordinary flowing water once
@@ -471,7 +478,6 @@ func _process_water_position(
 	if current == WATER_FALLING:
 		if not _water_has_upstream_supply(position, 1):
 			_water_set(position, AIR)
-			_water_schedule_neighbors(position)
 			return
 
 		_water_set(position, WATER_FLOW_1)
@@ -487,15 +493,12 @@ func _process_water_position(
 			current_level
 		):
 			_water_set(position, AIR)
-			_water_schedule_neighbors(position)
 			return
 
 		_water_spread_horizontal(
 			position,
 			current_level
 		)
-
-		_water_schedule_neighbors(position)
 		return
 
 	# Sources remain in place and spread as level 1 flow.
@@ -504,7 +507,6 @@ func _process_water_position(
 			position,
 			0
 		)
-		_water_schedule_neighbors(position)
 
 
 func process_water_queue(delta: float) -> void:
