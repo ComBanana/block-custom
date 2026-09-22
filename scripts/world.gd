@@ -857,11 +857,6 @@ func enqueue_water_updates_for_chunk(
 				if not _is_water_flowing(block_id):
 					continue
 
-					chunk_coord.x * CHUNK_SIZE + x,
-					y,
-					chunk_coord.y * CHUNK_SIZE + z
-				)
-
 				if _water_cell_has_open_destination(position):
 					_water_schedule(position)
 
