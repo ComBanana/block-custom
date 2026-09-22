@@ -23,8 +23,9 @@ const WATER_FALLING: int = 13
 const INVALID_CHUNK := Vector2i(999999, 999999)
 
 const PRIORITY_PLAYER: int = 0
-const PRIORITY_NEAR: int = 1
-const PRIORITY_FAR: int = 2
+const PRIORITY_WATER: int = 1
+const PRIORITY_NEAR: int = 2
+const PRIORITY_FAR: int = 3
 const TELEPORT_PRELOAD_RADIUS: int = 1
 
 const DAY_LENGTH_SECONDS: float = 24.0 * 60.0
@@ -909,7 +910,7 @@ func process_water_queue(delta: float) -> void:
 		_process_water_position(position)
 		processed += 1
 
-	# Water visual refreshes are lowest-priority mesh work.
+	# Water visual refreshes are prioritized above background streaming meshes.
 	for chunk_coord in water_dirty_mesh_chunks:
 		enqueue_water_mesh_chunk(chunk_coord)
 	water_dirty_mesh_chunks.clear()
@@ -3162,6 +3163,7 @@ func process_mesh_queue() -> void:
 			mesh_callable,
 			(
 				active_mesh_priority == PRIORITY_PLAYER
+				or active_mesh_priority == PRIORITY_WATER
 				or is_chunk_critical(chunk_coord)
 				or _is_chunk_teleport_required(chunk_coord)
 			),
@@ -3194,7 +3196,7 @@ func get_next_mesh_candidate() -> Vector2i:
 		water_mesh_queued
 	)
 	if water != INVALID_CHUNK:
-		active_mesh_priority = PRIORITY_FAR
+		active_mesh_priority = PRIORITY_WATER
 		return water
 
 	var critical := _take_best_mesh_candidate(
