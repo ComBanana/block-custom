@@ -46,6 +46,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var loading_focus_radius: int = 2
 @export var loading_scheduler_scan_limit: int = 64
 @export var loading_mesh_budget_ms: float = 8.0
+@export var loading_water_updates_per_tick: int = 4096
+@export var loading_water_tick_interval: float = 0.10
+@export var loading_water_budget_ms: float = 8.0
+@export var interactive_worker_reserve: int = 1
 
 
 @export_category("Streaming")
@@ -269,6 +273,14 @@ func _water_schedule(position: Vector3i) -> void:
 	if not water_updates_queued.has(position):
 		water_update_queue.append(position)
 		water_updates_queued[position] = true
+
+		var chunk_coord := world_to_chunk(
+			Vector3(position.x, position.y, position.z)
+		)
+		water_pending_by_chunk[chunk_coord] = (
+			int(water_pending_by_chunk.get(chunk_coord, 0))
+			+ 1
+		)
 
 
 func _water_get(position: Vector3i) -> int:
@@ -856,16 +868,28 @@ func _process_water_position(
 
 
 func process_water_queue(delta: float) -> void:
-	# The player cannot see or interact with the world yet. Keeping fluid
-	# simulation completely paused here prevents the loading pipeline from
-	# sharing main-thread time with thousands of queued water cells.
+	var active_tick_interval := water_tick_interval
+	var active_updates_per_tick := water_updates_per_tick
+	var active_budget_ms := water_budget_ms
+
+	# The loading screen is specifically here to let the important world
+	# settle before controls are enabled. Give water a bounded but more
+	# aggressive simulation window during loading, while normal gameplay
+	# keeps the cheaper settings.
 	if not player_spawned:
-		water_tick_accumulator = 0.0
-		return
+		active_tick_interval = loading_water_tick_interval
+		active_updates_per_tick = maxi(
+			water_updates_per_tick,
+			loading_water_updates_per_tick
+		)
+		active_budget_ms = maxf(
+			water_budget_ms,
+			loading_water_budget_ms
+		)
 
 	water_tick_accumulator += delta
 
-	if water_tick_accumulator < water_tick_interval:
+	if water_tick_accumulator < active_tick_interval:
 		return
 
 	water_tick_accumulator = fmod(
@@ -886,13 +910,13 @@ func process_water_queue(delta: float) -> void:
 	var tick_queue_end: int = water_update_queue.size()
 
 	while (
-		processed < water_updates_per_tick
+		processed < active_updates_per_tick
 		and water_update_queue_head < tick_queue_end
 	):
 		if (
 			processed > 0
-			and water_budget_ms > 0.0
-			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= water_budget_ms
+			and active_budget_ms > 0.0
+			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= active_budget_ms
 		):
 			break
 		var position: Vector3i = water_update_queue[
@@ -903,6 +927,17 @@ func process_water_queue(delta: float) -> void:
 		water_updates_queued.erase(
 			position
 		)
+
+		var position_chunk := world_to_chunk(
+			Vector3(position.x, position.y, position.z)
+		)
+		var pending_count := int(
+			water_pending_by_chunk.get(position_chunk, 0)
+		)
+		if pending_count <= 1:
+			water_pending_by_chunk.erase(position_chunk)
+		else:
+			water_pending_by_chunk[position_chunk] = pending_count - 1
 
 		_process_water_position(position)
 		processed += 1
@@ -918,6 +953,7 @@ func process_water_queue(delta: float) -> void:
 	if water_update_queue_head >= water_update_queue.size():
 		water_update_queue.clear()
 		water_update_queue_head = 0
+		water_pending_by_chunk.clear()
 	elif water_update_queue_head >= 1024 and water_update_queue_head * 2 >= water_update_queue.size():
 		water_update_queue = water_update_queue.slice(
 			water_update_queue_head
@@ -1016,6 +1052,7 @@ var collision_queued: Dictionary = {}
 var water_update_queue: Array[Vector3i] = []
 var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
+var water_pending_by_chunk: Dictionary = {}
 var water_dirty_mesh_chunks: Dictionary = {}
 var water_block_cache: Dictionary = {}
 var water_tick_accumulator: float = 0.0
@@ -1540,8 +1577,17 @@ func _process(delta: float) -> void:
 
 	process_load_queue()
 	process_generation_queue()
-	process_mesh_queue()
-	process_water_queue(delta)
+
+	if not player_spawned:
+		# Water gets first access to newly generated terrain while the
+		# loading screen is still covering the world. Normal meshes then
+		# capture the most up-to-date block state.
+		process_water_queue(delta)
+		process_mesh_queue()
+	else:
+		process_mesh_queue()
+		process_water_queue(delta)
+
 	process_collision_queue()
 	_process_pending_teleport()
 
@@ -1579,10 +1625,26 @@ func _available_worker_budget() -> int:
 	return maxi(1, OS.get_processor_count() - 1)
 
 
+func _background_worker_capacity() -> int:
+	var reserve := 0
+
+	if player_spawned:
+		reserve = clampi(
+			interactive_worker_reserve,
+			0,
+			_available_worker_budget() - 1
+		)
+
+	return maxi(
+		1,
+		_available_worker_budget() - reserve
+	)
+
+
 func _generation_submit_limit() -> int:
 	var desired_generation := _generation_task_limit()
 	var desired_mesh := _mesh_task_limit()
-	var total_limit := _available_worker_budget()
+	var total_limit := _background_worker_capacity()
 
 	if desired_generation <= 0 or total_limit <= 0:
 		return 0
@@ -1617,7 +1679,7 @@ func _generation_submit_limit() -> int:
 
 func _mesh_submit_limit() -> int:
 	var desired_mesh := _mesh_task_limit()
-	var total_limit := _available_worker_budget()
+	var total_limit := _background_worker_capacity()
 
 	if desired_mesh <= 0:
 		return 0
@@ -2758,9 +2820,6 @@ func enqueue_water_mesh_chunk(
 	chunk_coord: Vector2i
 ) -> void:
 
-	if not player_spawned:
-		return
-
 	if not loaded_chunks.has(chunk_coord):
 		return
 
@@ -3038,7 +3097,11 @@ func process_mesh_queue() -> void:
 
 	var mesh_limit := _mesh_submit_limit()
 	if mesh_limit <= 0:
-		return
+		# A player edit may use the reserved interactive worker even when
+		# all background mesh slots are currently occupied.
+		if not player_spawned or player_edit_queue.is_empty():
+			return
+		mesh_limit = mesh_tasks.size() + 1
 
 	while mesh_tasks.size() < mesh_limit:
 		var chunk_coord: Vector2i = (
@@ -3085,7 +3148,8 @@ func process_mesh_queue() -> void:
 		var task_id: int = WorkerThreadPool.add_task(
 			mesh_callable,
 			(
-				is_chunk_critical(chunk_coord)
+				active_mesh_priority == PRIORITY_PLAYER
+				or is_chunk_critical(chunk_coord)
 				or _is_chunk_teleport_required(chunk_coord)
 			),
 			"Mesh chunk (%d, %d)" % [
@@ -3615,6 +3679,29 @@ func get_spawn_area_ready() -> int:
 	return ready_count
 
 
+func _loading_water_ready() -> bool:
+	var focus_radius: int = maxi(
+		spawn_load_radius,
+		loading_focus_radius
+	)
+
+	# The queue can contain work from the whole streamed world. Only block
+	# player release on fluid work whose chunk is inside the important
+	# startup focus around the spawn point.
+	for chunk_coord in water_pending_by_chunk:
+		var pending_count := int(water_pending_by_chunk[chunk_coord])
+		if pending_count <= 0:
+			continue
+
+		var dx := abs(chunk_coord.x - player_chunk.x)
+		var dz := abs(chunk_coord.y - player_chunk.y)
+
+		if dx <= focus_radius and dz <= focus_radius:
+			return false
+
+	return true
+
+
 func update_loading_progress() -> void:
 
 	if player_spawned:
@@ -3645,6 +3732,9 @@ func try_spawn_player() -> void:
 	var completed: int = get_spawn_area_ready()
 
 	if completed < total:
+		return
+
+	if not _loading_water_ready():
 		return
 
 	var spawn_chunk = loaded_chunks[
