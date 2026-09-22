@@ -28,11 +28,37 @@ func execute(
 	match command:
 		"tp", "teleport":
 			return _execute_tp(parts.slice(1), player, world)
+		"time":
+			return _execute_time(parts.slice(1), world)
 		_:
 			return {
 				"success": false,
 				"message": "Unknown command: /%s" % parts[0]
 			}
+
+
+func _execute_time(
+	args: Array,
+	world: Node3D
+) -> Dictionary:
+	if args.size() != 2 or args[0].to_lower() != "set":
+		return {
+			"success": false,
+			"message": "Usage: /time set <sunrise|day|noon|evening|sunset|night|midnight>"
+		}
+
+	var preset := args[1].to_lower()
+
+	if not world.set_time_preset(preset):
+		return {
+			"success": false,
+			"message": "Unknown time: %s" % args[1]
+		}
+
+	return {
+		"success": true,
+		"message": "Time set to %s." % preset
+	}
 
 
 func _execute_tp(
