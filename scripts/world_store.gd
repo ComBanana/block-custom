@@ -59,18 +59,40 @@ static func chunk_path(world_name: String, chunk_coord: Vector2i) -> String:
 
 
 static func sanitize_world_name(world_name: String) -> String:
+	# World names are folder names, so only the characters forbidden by
+	# the host filesystem are removed. Normal punctuation, dots, symbols,
+	# and Unicode characters remain usable in the visible world title.
 	var cleaned := ""
-	for character in world_name.strip_edges():
-		if (
-			(character >= "a" and character <= "z")
-			or (character >= "A" and character <= "Z")
-			or (character >= "0" and character <= "9")
-			or character == "_"
-			or character == "-"
-			or character == " "
-		):
-			cleaned += character
-	return cleaned.strip_edges()
+	for character in world_name:
+		var code := character.unicode_at(0)
+		if code < 32:
+			continue
+		if character in ["<", ">", ":", """, "/", "\\", "|", "?", "*"]:
+			continue
+		cleaned += character
+
+	cleaned = cleaned.strip_edges()
+	while cleaned.ends_with("."):
+		cleaned = cleaned.trim_suffix(".")
+	while cleaned.ends_with(" "):
+		cleaned = cleaned.trim_suffix(" ")
+
+	if cleaned == "." or cleaned == "..":
+		return ""
+
+	# Windows reserves device names even when used as directory names.
+	var base_name := cleaned.get_slice(".", 0).to_upper()
+	var reserved := [
+		"CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5",
+		"COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
+		"LPT6", "LPT7", "LPT8", "LPT9"
+	]
+	if base_name in reserved:
+		cleaned += "_"
+
+	return cleaned
 
 
 static func ensure_world_folders(world_name: String) -> void:
@@ -251,6 +273,13 @@ static func _save_metadata_to_root(
 	DirAccess.make_dir_recursive_absolute("%s/chunks" % directory)
 
 	data["name"] = world_name
+	data["save_format_version"] = CURRENT_SAVE_FORMAT_VERSION
+	data["game_version"] = str(
+		ProjectSettings.get_setting(
+			"application/config/version",
+			UNKNOWN_LEGACY_GAME_VERSION
+		)
+	)
 	data["modified_at"] = Time.get_unix_time_from_system()
 
 	var path := "%s/world.json" % directory
