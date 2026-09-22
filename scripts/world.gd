@@ -894,13 +894,15 @@ func _has_urgent_streaming_work() -> bool:
 
 
 func process_water_queue(delta: float) -> void:
-	# Fluid simulation is a gameplay-time system. The loading screen never
-	# advances it, so a saved world resumes from its saved block states.
+	# Fluid simulation is a gameplay-time system. The loading screen may
+	# prepare the scheduled frontier, but it never advances or mutates water.
 	if not player_spawned:
 		water_tick_accumulator = 0.0
 		return
 
-	# Chunk streaming has priority over fluid simulation in the active area.
+	# Nearby streaming work has priority. Far chunks may continue loading
+	# while water runs, but water yields whenever terrain that matters to the
+	# player is still being prepared.
 	if _has_urgent_streaming_work():
 		return
 
@@ -922,44 +924,42 @@ func process_water_queue(delta: float) -> void:
 	var budget_start_usec := Time.get_ticks_usec()
 
 	# Fluid updates created while this tick is being processed are
-	# deferred until the next tick, matching Minecraft's scheduled
-	# fluid-tick behavior.
+	# deferred until the next tick, matching scheduled-fluid behavior.
 	var tick_queue_end: int = water_update_queue.size()
 
 	while (
-		processed < active_updates_per_tick
+		processed < water_updates_per_tick
 		and water_update_queue_head < tick_queue_end
 	):
 		if (
 			processed > 0
-			and active_budget_ms > 0.0
-			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= active_budget_ms
+			and water_budget_ms > 0.0
+			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= water_budget_ms
 		):
 			break
+
 		var position: Vector3i = water_update_queue[
 			water_update_queue_head
 		]
 		water_update_queue_head += 1
 
-		water_updates_queued.erase(
-			position
-		)
+		water_updates_queued.erase(position)
 
 		_process_water_position(position)
 		processed += 1
 
-	# Refresh each affected chunk at most once per water tick.
-	# These are deliberately sent to the low-priority water-mesh queue so
-	# streaming chunks stay ahead of fluid visuals.
+	# Water visual refreshes are lowest-priority mesh work.
 	for chunk_coord in water_dirty_mesh_chunks:
 		enqueue_water_mesh_chunk(chunk_coord)
 	water_dirty_mesh_chunks.clear()
 
-	# Keep queue removal O(1) while avoiding an ever-growing backing array.
 	if water_update_queue_head >= water_update_queue.size():
 		water_update_queue.clear()
 		water_update_queue_head = 0
-	elif water_update_queue_head >= 1024 and water_update_queue_head * 2 >= water_update_queue.size():
+	elif (
+		water_update_queue_head >= 1024
+		and water_update_queue_head * 2 >= water_update_queue.size()
+	):
 		water_update_queue = water_update_queue.slice(
 			water_update_queue_head
 		)
@@ -988,11 +988,22 @@ func enqueue_water_updates_for_chunk(
 	chunk_coord: Vector2i,
 	restore_saved_flow: bool = false
 ) -> void:
-	# Loading prepares block data and meshes only. Fluid simulation begins
-	# after the player is released, so opening a world never advances water
-	# invisibly while the loading screen is up.
+	# Loading is allowed to prepare the scheduled fluid frontier, but only
+	# for the startup area. No fluid tick is processed until the player
+	# is released, so the saved/generated water state remains untouched.
 	if not player_spawned:
-		return
+		var startup_radius: int = maxi(
+			0,
+			spawn_load_radius
+		)
+		var startup_dx := abs(chunk_coord.x - player_chunk.x)
+		var startup_dz := abs(chunk_coord.y - player_chunk.y)
+
+		if (
+			startup_dx > startup_radius
+			or startup_dz > startup_radius
+		):
+			return
 
 	if not loaded_chunks.has(chunk_coord):
 		return
@@ -1064,7 +1075,6 @@ var water_update_queue: Array[Vector3i] = []
 var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
 var water_dirty_mesh_chunks: Dictionary = {}
-var restored_water_chunks: Dictionary = {}
 var water_block_cache: Dictionary = {}
 var water_tick_accumulator: float = 0.0
 
@@ -1589,11 +1599,10 @@ func _process(delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 
+	# Loading: generation -> mesh -> collision. Water may have queued
+	# scheduled frontiers, but process_water_queue() intentionally does
+	# nothing until player_spawned becomes true.
 	if not player_spawned:
-		# Water gets first access to newly generated terrain while the
-		# loading screen is still covering the world. Normal meshes then
-		# capture the most up-to-date block state.
-		process_water_queue(delta)
 		process_mesh_queue()
 	else:
 		process_mesh_queue()
@@ -2375,8 +2384,6 @@ func load_chunk(
 		)
 
 		chunk.apply_generated_data(migrated_blocks)
-		restored_water_chunks[chunk_coord] = true
-
 		# Persist the upgraded representation on the next world save.
 		# This keeps old edits while avoiding repeated migration work.
 		if was_legacy_format:
@@ -3392,7 +3399,6 @@ func unload_chunk(
 	loaded_chunks.erase(
 		chunk_coord
 	)
-	restored_water_chunks.erase(chunk_coord)
 
 	load_queued.erase(
 		chunk_coord
@@ -3724,38 +3730,6 @@ func update_loading_progress() -> void:
 	)
 
 
-func _seed_loaded_water_simulation() -> void:
-	var radius: int = maxi(
-		loading_focus_radius,
-		critical_chunk_distance
-	)
-
-	# Start with the already-loaded startup area. Far chunks are allowed to
-	# begin simulation when their normal streaming load completes during play.
-	for chunk_coord in loaded_chunks:
-		var dx := abs(chunk_coord.x - player_chunk.x)
-		var dz := abs(chunk_coord.y - player_chunk.y)
-
-		if dx > radius or dz > radius:
-			continue
-
-		# Re-run the existing frontier scan against the exact saved/generated
-		# block state. No water block is modified by this function.
-		var chunk = loaded_chunks[chunk_coord]
-		if not chunk.is_generated:
-			continue
-
-		# Newly generated and restored chunks both use the same current block
-		# state; the restore flag only changes how aggressively the scan looks.
-		var restore_saved_flow := restored_water_chunks.has(
-			chunk_coord
-		)
-		enqueue_water_updates_for_chunk(
-			chunk_coord,
-			restore_saved_flow
-		)
-
-
 func try_spawn_player():
 
 	if player_spawned:
@@ -3807,10 +3781,6 @@ func try_spawn_player():
 	stream_speed = 0.0
 
 	player_spawned = true
-
-	# The world is fully loaded before this point. Only now do we seed the
-	# loaded chunks' existing water states into the runtime fluid queue.
-	_seed_loaded_water_simulation()
 
 	player.set_physics_process(true)
 
