@@ -856,43 +856,6 @@ func _process_water_position(
 	)
 
 
-func _has_urgent_streaming_work() -> bool:
-	var focus_radius: int = maxi(
-		loading_focus_radius,
-		critical_chunk_distance
-	)
-
-	# Background streaming may continue while water runs, but the chunks
-	# immediately around the player always win. This prevents fluid work
-	# from taking main-thread time while the player is waiting for nearby
-	# terrain to become usable.
-	for chunk_coord in load_queue:
-		var dx: int = abs(chunk_coord.x - player_chunk.x)
-		var dz: int = abs(chunk_coord.y - player_chunk.y)
-		if dx <= focus_radius and dz <= focus_radius:
-			return true
-
-	for chunk_coord in critical_generation_queue:
-		var dx: int = abs(chunk_coord.x - player_chunk.x)
-		var dz: int = abs(chunk_coord.y - player_chunk.y)
-		if dx <= focus_radius and dz <= focus_radius:
-			return true
-
-	for chunk_coord in critical_mesh_queue:
-		var dx: int = abs(chunk_coord.x - player_chunk.x)
-		var dz: int = abs(chunk_coord.y - player_chunk.y)
-		if dx <= focus_radius and dz <= focus_radius:
-			return true
-
-	for chunk_coord in near_mesh_queue:
-		var dx: int = abs(chunk_coord.x - player_chunk.x)
-		var dz: int = abs(chunk_coord.y - player_chunk.y)
-		if dx <= focus_radius and dz <= focus_radius:
-			return true
-
-	return false
-
-
 func process_water_queue(delta: float) -> void:
 	# Fluid simulation is a gameplay-time system. The loading screen may
 	# prepare the scheduled frontier, but it never advances or mutates water.
@@ -900,12 +863,10 @@ func process_water_queue(delta: float) -> void:
 		water_tick_accumulator = 0.0
 		return
 
-	# Nearby streaming work has priority. Far chunks may continue loading
-	# while water runs, but water yields whenever terrain that matters to the
-	# player is still being prepared.
-	if _has_urgent_streaming_work():
-		return
-
+	# Chunk load/generation/mesh processing runs before this function in
+	# _process(). Water therefore gets a small independent budget after the
+	# streaming pipeline has had its turn, instead of being able to starve
+	# or be starved indefinitely by queue depth.
 	water_tick_accumulator += delta
 
 	if water_tick_accumulator < water_tick_interval:
@@ -1599,13 +1560,10 @@ func _process(delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 
-	# Loading: generation -> mesh -> collision. Water may have queued
-	# scheduled frontiers, but process_water_queue() intentionally does
-	# nothing until player_spawned becomes true.
-	if not player_spawned:
-		process_mesh_queue()
-	else:
-		process_mesh_queue()
+	# Always finish the current frame's streaming work before running the
+	# gameplay fluid tick. During loading, water remains inert.
+	process_mesh_queue()
+	if player_spawned:
 		process_water_queue(delta)
 
 	process_collision_queue()
@@ -1674,12 +1632,20 @@ func _generation_submit_limit() -> int:
 	if desired_total <= 0:
 		return 0
 
-	# Split the shared worker pool according to the configured demand,
-	# instead of letting generation and meshing each reserve the whole pool.
+	# Keep at least half of the background capacity available to meshing
+	# whenever there is mesh demand. This prevents terrain generation from
+	# consuming every worker while visible chunks wait for their mesh.
 	var generation_share := floori(
 		float(total_limit * desired_generation) /
 		float(desired_total)
 	)
+
+	if desired_mesh > 0 and total_limit >= 2:
+		generation_share = mini(
+			generation_share,
+			total_limit - 1
+		)
+
 	generation_share = clampi(
 		generation_share,
 		1,
@@ -3141,6 +3107,18 @@ func process_mesh_queue() -> void:
 
 		if chunk_coord == INVALID_CHUNK:
 			return
+
+		# Water-only mesh work is deliberately opportunistic. Never start one
+		# while newly-arrived critical/near streaming work is waiting.
+		if active_mesh_priority == PRIORITY_FAR:
+			if (
+				not critical_mesh_queue.is_empty()
+				or not near_mesh_queue.is_empty()
+				or not critical_generation_queue.is_empty()
+			):
+				# Put the selected far/water candidate back through its normal
+				# queue path on the next frame instead of consuming the slot now.
+			continue
 
 		if not loaded_chunks.has(chunk_coord):
 			continue
