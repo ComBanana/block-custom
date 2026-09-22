@@ -3108,17 +3108,6 @@ func process_mesh_queue() -> void:
 		if chunk_coord == INVALID_CHUNK:
 			return
 
-		# Water-only mesh work is deliberately opportunistic. Never start one
-		# while newly-arrived critical/near streaming work is waiting.
-		if active_mesh_priority == PRIORITY_FAR:
-			if (
-				not critical_mesh_queue.is_empty()
-				or not near_mesh_queue.is_empty()
-				or not critical_generation_queue.is_empty()
-			):
-				# Put the selected far/water candidate back through its normal
-				# queue path on the next frame instead of consuming the slot now.
-			continue
 
 		if not loaded_chunks.has(chunk_coord):
 			continue
