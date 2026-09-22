@@ -5,7 +5,7 @@ extends Control
 @onready var create_panel: Control = $Center/CreatePanel
 @onready var settings_panel: Control = $Center/SettingsPanel
 
-@onready var world_list: ItemList = $Center/WorldsPanel/VBox/WorldList
+@onready var world_list: VBoxContainer = $Center/WorldsPanel/VBox/WorldListScroll/WorldList
 @onready var play_world_button: Button = $Center/WorldsPanel/VBox/Buttons/PlayButton
 @onready var delete_world_button: Button = $Center/WorldsPanel/VBox/Buttons/DeleteButton
 
@@ -39,6 +39,8 @@ var version_label: Label
 @onready var username_error: Label = $UsernamePanel/VBox/ErrorLabel
 
 var worlds: Array[Dictionary] = []
+var selected_world_index: int = -1
+var world_cards: Array[Control] = []
 var legacy_migration_dialog: ConfirmationDialog
 
 
@@ -187,28 +189,144 @@ func _on_back_pressed() -> void:
 	_show_panel(main_panel)
 
 
+func _world_card_style(selected: bool) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = (
+		Color(0.22, 0.22, 0.22, 0.96)
+		if selected
+		else Color(0.12, 0.12, 0.12, 0.92)
+	)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = (
+		Color(0.85, 0.85, 0.85, 1.0)
+		if selected
+		else Color(0.35, 0.35, 0.35, 1.0)
+	)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	return style
+
+
+func _refresh_world_selection() -> void:
+	for index in range(world_cards.size()):
+		var card := world_cards[index]
+		if not is_instance_valid(card):
+			continue
+		card.add_theme_stylebox_override(
+			"panel",
+			_world_card_style(index == selected_world_index)
+		)
+
+
+func _on_world_card_gui_input(
+	event: InputEvent,
+	index: int
+) -> void:
+	if (
+		event is InputEventMouseButton
+		and event.button_index == MOUSE_BUTTON_LEFT
+		and event.pressed
+	):
+		selected_world_index = index
+		_refresh_world_selection()
+		get_viewport().set_input_as_handled()
+
+
+func _clear_world_cards() -> void:
+	for card in world_cards:
+		if is_instance_valid(card):
+			card.queue_free()
+	world_cards.clear()
+
+
 func _refresh_worlds() -> void:
 	worlds = WorldStore.list_worlds()
-	world_list.clear()
-	for world_data in worlds:
-		var seed_value: int = int(world_data.get("seed", 0))
-		world_list.add_item(
-			"%s    (seed %d)" % [
-				str(world_data.get("name", "World")),
-				seed_value
-			]
+	_clear_world_cards()
+	selected_world_index = -1
+
+	for index in range(worlds.size()):
+		var world_data := worlds[index]
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(440, 78)
+		card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		card.mouse_filter = Control.MOUSE_FILTER_STOP
+		card.add_theme_stylebox_override(
+			"panel",
+			_world_card_style(false)
 		)
-	play_world_button.disabled = worlds.is_empty()
-	delete_world_button.disabled = worlds.is_empty()
+
+		var body := VBoxContainer.new()
+		body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		body.add_theme_constant_override("separation", 2)
+		card.add_child(body)
+
+		var top_row := HBoxContainer.new()
+		top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		body.add_child(top_row)
+
+		var name_label := Label.new()
+		name_label.text = str(world_data.get("name", "World"))
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		name_label.add_theme_font_size_override("font_size", 18)
+		top_row.add_child(name_label)
+
+		var seed_label := Label.new()
+		seed_label.text = "Seed %d" % int(world_data.get("seed", 0))
+		seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		seed_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		top_row.add_child(seed_label)
+
+		var bottom_row := HBoxContainer.new()
+		bottom_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		body.add_child(bottom_row)
+
+		var spacer := Control.new()
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bottom_row.add_child(spacer)
+
+		var version_label := Label.new()
+		var game_version := str(
+			world_data.get(
+				"game_version",
+				WorldStore.UNKNOWN_LEGACY_GAME_VERSION
+			)
+		)
+		var is_legacy := game_version == WorldStore.UNKNOWN_LEGACY_GAME_VERSION
+		version_label.text = (
+			"v%s (legacy)" % game_version
+			if is_legacy
+			else "v%s" % game_version
+		)
+		version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		version_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		version_label.modulate = Color(0.75, 0.75, 0.75, 1.0)
+		bottom_row.add_child(version_label)
+
+		card.gui_input.connect(
+			_on_world_card_gui_input.bind(index)
+		)
+		world_list.add_child(card)
+		world_cards.append(card)
+
 	if not worlds.is_empty():
-		world_list.select(0)
+		selected_world_index = 0
+		_refresh_world_selection()
+
+	play_world_button.disabled = selected_world_index < 0
+	delete_world_button.disabled = selected_world_index < 0
 
 
 func _selected_world_name() -> String:
-	var selected := world_list.get_selected_items()
-	if selected.is_empty() or selected[0] >= worlds.size():
+	if selected_world_index < 0 or selected_world_index >= worlds.size():
 		return ""
-	return str(worlds[selected[0]].get("name", ""))
+	return str(worlds[selected_world_index].get("name", ""))
 
 
 func _on_play_world_pressed(_index: int = 0) -> void:
