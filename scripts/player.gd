@@ -90,7 +90,7 @@ var controls_enabled: bool = false
 var chat_active: bool = false
 var is_crouching: bool = false
 
-const BLOCK_ACTION_INTERVAL: float = 0.10
+const BLOCK_ACTION_INTERVAL: float = 0.05
 const DOUBLE_TAP_SPRINT_WINDOW: float = 0.30
 
 var block_action_timer: float = 0.0
@@ -148,7 +148,7 @@ func break_block() -> void:
 
 	var block_position := (hit_position - hit_normal * 0.01).floor()
 
-	world.set_block_world(
+	world.queue_player_block_update(
 		block_position,
 		0
 	)
@@ -170,7 +170,7 @@ func place_block() -> void:
 	if block_overlaps_player(block_position):
 		return
 
-	world.set_block_world(
+	world.queue_player_block_update(
 		block_position,
 		world.selected_block
 	)
