@@ -373,7 +373,8 @@ static func build(
 						y,
 						z,
 						block_id,
-						buffer
+						buffer,
+						chunk_coordinate
 					)
 
 	return buffer
