@@ -2686,7 +2686,6 @@ func enqueue_mesh_chunk(
 	# same chunk to be rebuilt repeatedly during startup.
 	if (
 		not player_spawned
-		and _is_chunk_in_spawn_area(chunk_coord)
 		and not _loading_mesh_neighbors_ready(chunk_coord)
 	):
 		return
@@ -3639,48 +3638,62 @@ func save_world() -> void:
 # Loading screen / spawn
 # ===================================================================
 
-func get_spawn_area_total() -> int:
-
-	var diameter: int = (
-		spawn_load_radius * 2
-	) + 1
-
-	return diameter * diameter
+func get_loading_area_total() -> int:
+	# The loading screen intentionally covers the entire configured
+	# render-distance square. This prevents background terrain streaming
+	# from immediately competing with gameplay after spawn.
+	return required_chunks.size()
 
 
-func get_spawn_area_ready() -> int:
+func get_loading_area_ready() -> int:
 	var ready_count: int = 0
 
+	for chunk_coord in required_chunks:
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if not chunk.is_generated:
+			continue
+
+		if not chunk.mesh_ready:
+			continue
+
+		ready_count += 1
+
+	return ready_count
+
+
+func _loading_collision_ready() -> bool:
+	# Collision is only needed close to the player. Requiring it for the
+	# whole render distance would create hundreds of expensive Jolt shapes
+	# with no gameplay benefit.
 	for x in range(
-		-spawn_load_radius,
-		spawn_load_radius + 1
+		-collision_distance,
+		collision_distance + 1
 	):
 		for z in range(
-			-spawn_load_radius,
-		spawn_load_radius + 1
+			-collision_distance,
+			collision_distance + 1
 		):
 			var chunk_coord := Vector2i(
 				player_chunk.x + x,
 				player_chunk.y + z
 			)
 
-			if not loaded_chunks.has(chunk_coord):
+			if not required_chunks.has(chunk_coord):
 				continue
+
+			if not loaded_chunks.has(chunk_coord):
+				return false
 
 			var chunk = loaded_chunks[chunk_coord]
 
-			if not chunk.is_generated:
-				continue
-
-			if not chunk.mesh_ready:
-				continue
-
 			if not chunk.collision_ready:
-				continue
+				return false
 
-			ready_count += 1
-
-	return ready_count
+	return true
 
 
 func update_loading_progress() -> void:
@@ -3688,8 +3701,8 @@ func update_loading_progress() -> void:
 	if player_spawned:
 		return
 
-	var total: int = get_spawn_area_total()
-	var completed: int = get_spawn_area_ready()
+	var total: int = get_loading_area_total()
+	var completed: int = get_loading_area_ready()
 
 	loading_screen.set_progress(
 		completed,
@@ -3709,8 +3722,8 @@ func try_spawn_player():
 	):
 		return
 
-	var total: int = get_spawn_area_total()
-	var completed: int = get_spawn_area_ready()
+	var total: int = get_loading_area_total()
+	var completed: int = get_loading_area_ready()
 
 	if completed < total:
 		return
@@ -3719,8 +3732,8 @@ func try_spawn_player():
 		spawn_chunk_coord
 	]
 
-	# The central chunk must have collision before the player is released.
-	if not spawn_chunk.collision_ready:
+	# All nearby collision chunks must be ready before the player is released.
+	if not _loading_collision_ready():
 		return
 
 	if not has_saved_player_position:
