@@ -372,7 +372,9 @@ func _water_try_source_conversion(
 		position + Vector3i(0, -1, 0)
 	)
 
-	if below == AIR or _is_water(below):
+	# Minecraft also permits source conversion when the block below
+	# is another water source.
+	if below == AIR or (_is_water(below) and below != WATER):
 		return false
 
 	return _water_set(
@@ -832,19 +834,25 @@ func enqueue_water_updates_for_chunk(
 		for z in range(CHUNK_SIZE):
 			for y in range(CHUNK_HEIGHT):
 				var block_id: int = chunk.get_block(x, y, z)
+				var position := Vector3i(
+					chunk_coord.x * CHUNK_SIZE + x,
+					y,
+					chunk_coord.y * CHUNK_SIZE + z
+				)
 
 				if block_id == WATER_FALLING:
-					_water_schedule(Vector3i(
-						chunk_coord.x * CHUNK_SIZE + x,
-						y,
-						chunk_coord.y * CHUNK_SIZE + z
-					))
+					_water_schedule(position)
+					continue
+
+				if block_id == WATER:
+					# Only the exposed source frontier needs to wake up.
+					if _water_cell_has_open_destination(position):
+						_water_schedule(position)
 					continue
 
 				if not _is_water_flowing(block_id):
 					continue
 
-				var position := Vector3i(
 					chunk_coord.x * CHUNK_SIZE + x,
 					y,
 					chunk_coord.y * CHUNK_SIZE + z
