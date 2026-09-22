@@ -265,13 +265,18 @@ func _water_schedule(position: Vector3i) -> void:
 
 
 func _water_get(position: Vector3i) -> int:
-	return get_block_world(
+	if water_block_cache.has(position):
+		return int(water_block_cache[position])
+
+	var block_id: int = get_block_world(
 		Vector3(
 			position.x + 0.001,
 			position.y + 0.001,
 			position.z + 0.001
 		)
 	)
+	water_block_cache[position] = block_id
+	return block_id
 
 
 func _water_schedule_changed(
@@ -347,6 +352,9 @@ func _water_set(
 		false,
 		false
 	)
+
+	# The cached block state is now stale because this position changed.
+	water_block_cache.clear()
 
 	# A failed write means the destination chunk is not currently loaded.
 	if _water_get(position) != block_id:
@@ -717,6 +725,10 @@ func process_water_queue(delta: float) -> void:
 		water_tick_interval
 	)
 
+	# Cache block lookups for the duration of this fluid tick. The cache
+	# is invalidated whenever water writes a voxel.
+	water_block_cache.clear()
+
 	var processed: int = 0
 	var budget_start_usec := Time.get_ticks_usec()
 
@@ -855,6 +867,7 @@ var water_update_queue: Array[Vector3i] = []
 var water_update_queue_head: int = 0
 var water_updates_queued: Dictionary = {}
 var water_dirty_mesh_chunks: Dictionary = {}
+var water_block_cache: Dictionary = {}
 var water_tick_accumulator: float = 0.0
 
 
@@ -2406,6 +2419,12 @@ func enqueue_mesh_chunk(
 	if not chunk.is_generated:
 		return
 
+	# Never cancel a mesh worker just because fluid changed the chunk.
+	# Let the current result finish, then queue one replacement build.
+	if chunk.mesh_building:
+		chunk.mesh_rebuild_requested = true
+		return
+
 	# Spawn-area meshes are delayed until their required horizontal
 	# neighbors have generated. The mesher needs those borders to avoid
 	# treating unfinished neighbors as air, which otherwise causes the
@@ -2732,6 +2751,11 @@ func process_mesh_queue() -> void:
 
 		var mesh_apply_start_usec := Time.get_ticks_usec()
 		chunk.apply_mesh_buffer(result.buffer)
+
+		if chunk.mesh_rebuild_requested:
+			chunk.mesh_rebuild_requested = false
+			enqueue_mesh_chunk(result.chunk_coordinate)
+
 		generation_profiler.record(
 			"mesh_apply",
 			float(Time.get_ticks_usec() - mesh_apply_start_usec) / 1000.0
