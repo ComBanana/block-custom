@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="BlockCraft"
-config/version="0.7.2"
+config/version="0.7.3"
 run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
