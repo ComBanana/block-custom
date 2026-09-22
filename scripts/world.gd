@@ -229,6 +229,32 @@ func _water_flow_level(block_id: int) -> int:
 	return -1
 
 
+func _water_amount(block_id: int) -> int:
+	if block_id == WATER or block_id == WATER_FALLING:
+		return 8
+
+	if _is_water_flowing(block_id):
+		return 8 - _water_flow_level(block_id)
+
+	return 0
+
+
+func _water_block_for_amount(amount: int) -> int:
+	if amount >= 8:
+		return WATER
+
+	if amount <= 0:
+		return AIR
+
+	# Minecraft's flowing water states use levels 7..1, where a higher
+	# amount means a lower block-state level.
+	return WATER_FLOW_1 + clampi(
+		8 - amount - 1,
+		0,
+		6
+	)
+
+
 func _water_schedule(position: Vector3i) -> void:
 	if position.y < 0 or position.y >= CHUNK_HEIGHT:
 		return
@@ -270,6 +296,53 @@ func _water_schedule_changed(
 		var neighbor: Vector3i = position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
+
+
+func _wake_water_for_loaded_chunk(
+	chunk_coord: Vector2i
+) -> void:
+	# When a streamed chunk becomes available, wake water on its
+	# boundary and on the matching outside boundary so fluid can resume
+	# across chunk edges without scanning the whole world.
+	var min_x: int = chunk_coord.x * CHUNK_SIZE
+	var max_x: int = min_x + CHUNK_SIZE - 1
+	var min_z: int = chunk_coord.y * CHUNK_SIZE
+	var max_z: int = min_z + CHUNK_SIZE - 1
+
+	for y in range(CHUNK_HEIGHT):
+		for x in range(min_x, max_x + 1):
+			var north: Vector3i = Vector3i(x, y, min_z)
+			var south: Vector3i = Vector3i(x, y, max_z)
+
+			if _is_water(_water_get(north)):
+				_water_schedule(north)
+			if _is_water(_water_get(south)):
+				_water_schedule(south)
+
+			var north_outside: Vector3i = Vector3i(x, y, min_z - 1)
+			var south_outside: Vector3i = Vector3i(x, y, max_z + 1)
+
+			if _is_water(_water_get(north_outside)):
+				_water_schedule(north_outside)
+			if _is_water(_water_get(south_outside)):
+				_water_schedule(south_outside)
+
+		for z in range(min_z, max_z + 1):
+			var west: Vector3i = Vector3i(min_x, y, z)
+			var east: Vector3i = Vector3i(max_x, y, z)
+
+			if _is_water(_water_get(west)):
+				_water_schedule(west)
+			if _is_water(_water_get(east)):
+				_water_schedule(east)
+
+			var west_outside: Vector3i = Vector3i(min_x - 1, y, z)
+			var east_outside: Vector3i = Vector3i(max_x + 1, y, z)
+
+			if _is_water(_water_get(west_outside)):
+				_water_schedule(west_outside)
+			if _is_water(_water_get(east_outside)):
+				_water_schedule(east_outside)
 
 
 func _water_mark_mesh_dirty(
