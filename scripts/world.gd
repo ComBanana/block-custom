@@ -1049,6 +1049,9 @@ var player_chunk := Vector2i.ZERO
 var selected_block: int = GRASS
 
 var player_spawned: bool = false
+# True after terrain data is fully loaded and the loading screen has
+# finished, while the initial render/collision pass is still running.
+var startup_rendering: bool = false
 
 var world_name: String = "World"
 var world_seed: int = 12345
@@ -1560,18 +1563,22 @@ func _process(delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 
-	# Always finish the current frame's streaming work before running the
-	# gameplay fluid tick. During loading, water remains inert.
-	process_mesh_queue()
+	# Gameplay water runs before mesh processing so a fluid tick can
+	# enqueue its visual refreshes in the same frame. During the data-only
+	# loading phase, water remains completely inert.
 	if player_spawned:
 		process_water_queue(delta)
 
+	process_mesh_queue()
 	process_collision_queue()
 	_process_pending_teleport()
 
 	if not player_spawned:
-		update_loading_progress()
-		try_spawn_player()
+		if startup_rendering:
+			try_start_gameplay()
+		else:
+			update_loading_progress()
+			try_spawn_player()
 
 
 # ===================================================================
@@ -2658,6 +2665,12 @@ func enqueue_mesh_chunk(
 	chunk_coord: Vector2i
 ) -> void:
 
+	# Do not spend loading-screen time building/rendering meshes. The
+	# loading screen only generates chunk data; startup rendering begins
+	# after the loading screen has finished.
+	if not player_spawned and not startup_rendering:
+		return
+
 	if not loaded_chunks.has(
 		chunk_coord
 	):
@@ -2680,10 +2693,10 @@ func enqueue_mesh_chunk(
 		chunk.mesh_rebuild_requested = true
 		return
 
-	# Spawn-area meshes are delayed until their required horizontal
-	# neighbors have generated. The mesher needs those borders to avoid
-	# treating unfinished neighbors as air, which otherwise causes the
-	# same chunk to be rebuilt repeatedly during startup.
+	# Startup meshes wait for their required horizontal neighbors to have
+	# generated. At this point the loading screen has already generated
+	# the full render-distance data set, so this normally passes without
+	# render-time churn.
 	if (
 		not player_spawned
 		and not _loading_mesh_neighbors_ready(chunk_coord)
@@ -2803,6 +2816,9 @@ func _loading_mesh_neighbors_ready(
 func enqueue_water_mesh_chunk(
 	chunk_coord: Vector2i
 ) -> void:
+
+	if not player_spawned and not startup_rendering:
+		return
 
 	if not loaded_chunks.has(chunk_coord):
 		return
@@ -3171,6 +3187,16 @@ func get_next_mesh_candidate() -> Vector2i:
 		active_mesh_priority = PRIORITY_PLAYER
 		return player_coord
 
+	# Fluid visuals are gameplay-visible and should not sit behind the
+	# normal near/far streaming queues.
+	var water := _take_best_mesh_candidate(
+		water_mesh_queue,
+		water_mesh_queued
+	)
+	if water != INVALID_CHUNK:
+		active_mesh_priority = PRIORITY_FAR
+		return water
+
 	var critical := _take_best_mesh_candidate(
 		critical_mesh_queue,
 		critical_mesh_queued
@@ -3194,14 +3220,6 @@ func get_next_mesh_candidate() -> Vector2i:
 	if far != INVALID_CHUNK:
 		active_mesh_priority = PRIORITY_FAR
 		return far
-
-	var water := _take_best_mesh_candidate(
-		water_mesh_queue,
-		water_mesh_queued
-	)
-	if water != INVALID_CHUNK:
-		active_mesh_priority = PRIORITY_FAR
-		return water
 
 	return INVALID_CHUNK
 
@@ -3654,10 +3672,9 @@ func get_loading_area_ready() -> int:
 
 		var chunk = loaded_chunks[chunk_coord]
 
+		# The loading screen is intentionally data-only. Mesh generation
+		# starts after the loading screen finishes.
 		if not chunk.is_generated:
-			continue
-
-		if not chunk.mesh_ready:
 			continue
 
 		ready_count += 1
@@ -3712,7 +3729,7 @@ func update_loading_progress() -> void:
 
 func try_spawn_player():
 
-	if player_spawned:
+	if player_spawned or startup_rendering:
 		return
 
 	var spawn_chunk_coord := player_chunk
@@ -3725,16 +3742,14 @@ func try_spawn_player():
 	var total: int = get_loading_area_total()
 	var completed: int = get_loading_area_ready()
 
+	# The loading screen only waits for generated chunk data.
+	# Rendering/collision begins after the loading screen finishes.
 	if completed < total:
 		return
 
 	var spawn_chunk = loaded_chunks[
 		spawn_chunk_coord
 	]
-
-	# All nearby collision chunks must be ready before the player is released.
-	if not _loading_collision_ready():
-		return
 
 	if not has_saved_player_position:
 		var spawn_x: int = 8
@@ -3760,6 +3775,32 @@ func try_spawn_player():
 	stream_direction = Vector2.ZERO
 	stream_speed = 0.0
 
+	# Data is ready. Start the render/collision phase only now, after the
+	# loading screen, and keep gameplay/water paused until nearby collision
+	# is actually ready.
+	startup_rendering = true
+
+	for chunk_coord in required_chunks:
+		enqueue_mesh_chunk(chunk_coord)
+
+	loading_screen.finish()
+
+
+func try_start_gameplay() -> void:
+	if player_spawned or not startup_rendering:
+		return
+
+	if not loaded_chunks.has(player_chunk):
+		return
+
+	if not _loading_collision_ready():
+		return
+
+	var spawn_chunk = loaded_chunks[player_chunk]
+	if not spawn_chunk.mesh_ready:
+		return
+
+	startup_rendering = false
 	player_spawned = true
 
 	player.set_physics_process(true)
@@ -3773,8 +3814,6 @@ func try_spawn_player():
 		generation_profiler.get_elapsed_ms()
 	)
 	print(generation_profiler.get_summary())
-
-	loading_screen.finish()
 
 
 func _exit_tree() -> void:
