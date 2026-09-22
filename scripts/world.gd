@@ -305,7 +305,8 @@ func _water_schedule(
 	)
 
 	if existing_bucket is Array:
-		for existing_position in existing_bucket:
+		for existing_position_variant in existing_bucket:
+			var existing_position: Vector3i = existing_position_variant
 			bucket.append(existing_position)
 
 	bucket.append(block_position)
