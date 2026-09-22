@@ -120,6 +120,7 @@ class GenerationResult:
 class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
+	var data_revision: int = 0
 	var capture_ms: float = 0.0
 	var mesh_ms: float = 0.0
 	var center_blocks: PackedByteArray
@@ -3073,6 +3074,20 @@ func process_mesh_queue() -> void:
 			continue
 
 		var mesh_apply_start_usec := Time.get_ticks_usec()
+
+		# A worker may have captured an older block snapshot while the main
+		# thread processed a player edit or a fluid tick. Never apply a stale
+		# snapshot over newer block data; immediately schedule a fresh build.
+		if chunk.mesh_data_revision != result.data_revision:
+			chunk.mesh_building = false
+			chunk.mesh_ready = false
+			chunk.collision_ready = false
+			chunk.set_generation_stage(Chunk.GenerationStage.MESH_QUEUED)
+			chunk.mesh_rebuild_requested = false
+			chunk.water_mesh_rebuild_requested = false
+			enqueue_mesh_chunk(result.chunk_coordinate)
+			continue
+
 		chunk.apply_mesh_buffer(result.buffer)
 
 		if chunk.mesh_rebuild_requested:
@@ -3145,6 +3160,7 @@ func process_mesh_queue() -> void:
 		var result := MeshResult.new()
 		result.chunk_coordinate = chunk_coord
 		result.job_id = chunk.mesh_job_id
+		result.data_revision = chunk.mesh_data_revision
 		_capture_mesh_inputs(
 			chunk_coord,
 			result
@@ -3533,6 +3549,15 @@ func set_block_world(
 		local_z,
 		block_id
 	)
+
+	# Every block-state mutation gets its own revision. Worker mesh jobs use
+	# this to reject snapshots that were captured before the mutation.
+	chunk.mesh_data_revision += 1
+
+	if not update_mesh and chunk.mesh_building:
+		# Fluid changed the data while a mesh worker was already building.
+		# The current result is now stale and must be replaced.
+		chunk.water_mesh_rebuild_requested = true
 
 	dirty_chunks[chunk_coord] = true
 
