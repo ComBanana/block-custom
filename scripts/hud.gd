@@ -87,21 +87,19 @@ func _build_hotbar() -> void:
 			_hotbar_slot_style(false)
 		)
 
-		if index >= HOTBAR_ICONS.size():
-			continue
-
-		var icon := TextureRect.new()
-		icon.name = "Icon"
-		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		icon.offset_left = 5.0
-		icon.offset_top = 5.0
-		icon.offset_right = -5.0
-		icon.offset_bottom = -5.0
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.texture = HOTBAR_ICONS[index]
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		slot.add_child(icon)
+		if index < HOTBAR_ICONS.size():
+			var icon := TextureRect.new()
+			icon.name = "Icon"
+			icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			icon.offset_left = 5.0
+			icon.offset_top = 5.0
+			icon.offset_right = -5.0
+			icon.offset_bottom = -5.0
+			icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			icon.texture = HOTBAR_ICONS[index]
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			slot.add_child(icon)
 
 		var number := Label.new()
 		number.name = "Number"
