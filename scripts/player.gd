@@ -66,6 +66,8 @@ const BLOCK_RAY_LENGTH := 4.5
 @export var camera_transition_speed: float = 12.0
 
 var normal_fov: float
+var underwater_canvas: CanvasLayer
+var underwater_overlay: ColorRect
 var controls_enabled: bool = false
 var chat_active: bool = false
 var is_crouching: bool = false
@@ -231,6 +233,7 @@ func _ready() -> void:
 	swim_crawl_shape.size = Vector3(0.7, SWIM_CRAWL_HEIGHT, 0.7)
 
 	_apply_pose("standing", true)
+	_create_underwater_effect()
 
 
 func _apply_pose(pose: String, instant_camera: bool = false) -> void:
@@ -252,6 +255,44 @@ func _apply_pose(pose: String, instant_camera: bool = false) -> void:
 
 	if instant_camera:
 		camera.position.y = target_camera_height
+
+
+func _create_underwater_effect() -> void:
+	underwater_canvas = CanvasLayer.new()
+	underwater_canvas.name = "UnderwaterCanvas"
+	underwater_canvas.layer = 0
+	add_child(underwater_canvas)
+
+	underwater_overlay = ColorRect.new()
+	underwater_overlay.name = "UnderwaterOverlay"
+	underwater_overlay.set_anchors_and_offsets_preset(
+		Control.PRESET_FULL_RECT
+	)
+	underwater_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	underwater_overlay.color = Color(
+		0.02,
+		0.24,
+		0.65,
+		0.0
+	)
+	underwater_canvas.add_child(underwater_overlay)
+
+
+func _update_underwater_effect(delta: float) -> void:
+	if underwater_overlay == null:
+		return
+
+	var target_alpha: float = 0.0
+	if is_head_in_water():
+		target_alpha = 0.30
+
+	var overlay_color := underwater_overlay.color
+	overlay_color.a = move_toward(
+		overlay_color.a,
+		target_alpha,
+		delta * 6.0
+	)
+	underwater_overlay.color = overlay_color
 
 
 func _set_standing_pose() -> void:
@@ -626,6 +667,7 @@ func _physics_process(delta: float) -> void:
 
 	var in_water: bool = is_in_water()
 	var head_in_water: bool = is_head_in_water()
+	_update_underwater_effect(delta)
 
 	# is_in_water() is the authoritative water-state test. Do not
 	# override it with a "water below feet" check: at the edge of a
