@@ -512,10 +512,11 @@ func _water_new_state(
 func _water_slope_distance(
 	position: Vector3i,
 	incoming_direction: Vector3i,
-	remaining_steps: int,
+	depth: int,
 	cache: Dictionary
 ) -> int:
-	# Minecraft checks at most four blocks for a lower hole.
+	# Minecraft's getSlopeDistance() starts at depth 1 and recursively
+	# searches at most four blocks for a lower water hole.
 	var cache_key := (
 		"%d,%d,%d|%d,%d|%d" % [
 			position.x,
@@ -523,7 +524,7 @@ func _water_slope_distance(
 			position.z,
 			incoming_direction.x,
 			incoming_direction.z,
-			remaining_steps
+			depth
 		]
 	)
 
@@ -531,10 +532,10 @@ func _water_slope_distance(
 		return int(cache[cache_key])
 
 	if _water_is_hole(position):
-		cache[cache_key] = remaining_steps
-		return remaining_steps
+		cache[cache_key] = depth
+		return depth
 
-	if remaining_steps <= 0:
+	if depth >= 4:
 		cache[cache_key] = 1000
 		return 1000
 
@@ -560,7 +561,7 @@ func _water_slope_distance(
 		var distance: int = _water_slope_distance(
 			next_position,
 			-direction,
-			remaining_steps - 1,
+			depth + 1,
 			cache
 		)
 
@@ -618,7 +619,7 @@ func _water_spread_horizontal(
 			distance = _water_slope_distance(
 				target,
 				-direction,
-				4,
+				1,
 				cache
 			)
 
@@ -659,9 +660,11 @@ func _water_process_spread(
 	)
 	var below_id: int = _water_get(below)
 
+	# With BlockCraft's current full-block model, AIR is the only
+	# block that water can actually replace from above. Existing water
+	# cannot be replaced by the same water fluid.
 	var can_flow_down: bool = (
-		_water_can_pass_through(below)
-		and below_id != WATER
+		below_id == AIR
 	)
 
 	if can_flow_down:
