@@ -57,6 +57,7 @@ var generation_stage: GenerationStage = GenerationStage.UNLOADED
 var is_generated: bool = false
 var terrain_generating: bool = false
 var mesh_building: bool = false
+var mesh_rebuild_requested: bool = false
 
 var terrain_x: int = 0
 var mesh_x: int = 0
@@ -527,6 +528,7 @@ func apply_generated_data(
 
 func cancel_mesh_build() -> void:
 	mesh_building = false
+	mesh_rebuild_requested = false
 	mesh_ready = false
 	mesh_job_id += 1
 
