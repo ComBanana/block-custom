@@ -894,7 +894,7 @@ func process_water_queue(delta: float) -> void:
 
 	water_tick_accumulator = fmod(
 		water_tick_accumulator,
-		water_tick_interval
+		active_tick_interval
 	)
 
 	# Cache block lookups for the duration of this fluid tick. The cache
@@ -3101,9 +3101,21 @@ func process_mesh_queue() -> void:
 		# all background mesh slots are currently occupied.
 		if not player_spawned or player_edit_queue.is_empty():
 			return
-		mesh_limit = mesh_tasks.size() + 1
+		mesh_limit = mesh_tasks.size()
 
-	while mesh_tasks.size() < mesh_limit:
+	var interactive_slot_available := (
+		player_spawned
+		and not player_edit_queue.is_empty()
+	)
+
+	while true:
+		var allowed_mesh_tasks := mesh_limit
+		if interactive_slot_available:
+			allowed_mesh_tasks += 1
+
+		if mesh_tasks.size() >= allowed_mesh_tasks:
+			break
+
 		var chunk_coord: Vector2i = (
 			get_next_mesh_candidate()
 		)
@@ -3160,6 +3172,9 @@ func process_mesh_queue() -> void:
 
 		result.job_id = chunk.mesh_job_id
 		mesh_tasks[task_id] = result
+
+		if active_mesh_priority == PRIORITY_PLAYER:
+			interactive_slot_available = false
 
 
 func get_next_mesh_candidate() -> Vector2i:
@@ -3691,6 +3706,31 @@ func _loading_water_ready() -> bool:
 	for chunk_coord in water_pending_by_chunk:
 		var pending_count := int(water_pending_by_chunk[chunk_coord])
 		if pending_count <= 0:
+			continue
+
+		var dx := abs(chunk_coord.x - player_chunk.x)
+		var dz := abs(chunk_coord.y - player_chunk.y)
+
+		if dx <= focus_radius and dz <= focus_radius:
+			return false
+
+	for chunk_coord in water_mesh_queued:
+		var dx := abs(chunk_coord.x - player_chunk.x)
+		var dz := abs(chunk_coord.y - player_chunk.y)
+
+		if dx <= focus_radius and dz <= focus_radius:
+			return false
+
+	for chunk_coord in water_dirty_mesh_chunks:
+		var dx := abs(chunk_coord.x - player_chunk.x)
+		var dz := abs(chunk_coord.y - player_chunk.y)
+
+		if dx <= focus_radius and dz <= focus_radius:
+			return false
+
+	for chunk_coord in loaded_chunks:
+		var chunk = loaded_chunks[chunk_coord]
+		if not chunk.water_mesh_rebuild_requested:
 			continue
 
 		var dx := abs(chunk_coord.x - player_chunk.x)
