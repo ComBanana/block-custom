@@ -50,7 +50,11 @@ const HOTBAR_BLOCKS: Array[int] = [
 	DIRT,
 	STONE,
 	SAND,
-	WATER
+	WATER,
+	AIR,
+	AIR,
+	AIR,
+	AIR
 ]
 
 var selected_hotbar_slot: int = 0
@@ -547,11 +551,10 @@ func select_hotbar_slot(slot_index: int) -> void:
 	if HOTBAR_BLOCKS.is_empty():
 		return
 
-	selected_hotbar_slot = clampi(
-		slot_index,
-		0,
-		HOTBAR_BLOCKS.size() - 1
-	)
+	if slot_index < 0 or slot_index >= HOTBAR_BLOCKS.size():
+		return
+
+	selected_hotbar_slot = slot_index
 	world.selected_block = HOTBAR_BLOCKS[selected_hotbar_slot]
 
 
