@@ -71,6 +71,9 @@ var sand_material: StandardMaterial3D
 var water_material: StandardMaterial3D
 
 var mesh_job_id: int = 0
+# Incremented whenever block data changes. Mesh workers carry the revision
+# they captured so stale asynchronous results can never overwrite newer data.
+var mesh_data_revision: int = 0
 var collision_faces := PackedVector3Array()
 
 
@@ -514,6 +517,7 @@ func apply_generated_data(
 ) -> void:
 
 	blocks = generated_blocks
+	mesh_data_revision += 1
 	set_generation_stage(GenerationStage.TERRAIN_READY)
 
 	terrain_x = CHUNK_SIZE
