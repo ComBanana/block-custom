@@ -271,27 +271,31 @@ func _water_get(position: Vector3i) -> int:
 	)
 
 
-func _water_schedule_changed(position: Vector3i) -> void:
-	# Event-driven fluid scheduling: the changed cell is always relevant,
-	# but only adjacent water cells need to be reconsidered. Scheduling
-	# surrounding AIR cells caused large water bodies to create enormous
-	# queues of positions that could never change.
+func _water_schedule_changed(
+	position: Vector3i
+) -> void:
+	# Minecraft's LiquidBlock schedules the changed fluid cell when its
+	# state changes, and wakes adjacent water when a neighbor changes.
 	_water_schedule(position)
 
-	for offset in [
+	var offsets: Array[Vector3i] = [
 		Vector3i(0, -1, 0),
 		Vector3i(0, 1, 0),
 		Vector3i(-1, 0, 0),
 		Vector3i(1, 0, 0),
 		Vector3i(0, 0, -1),
 		Vector3i(0, 0, 1)
-	]:
+	]
+
+	for offset: Vector3i in offsets:
 		var neighbor: Vector3i = position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
 
 
-func _water_mark_mesh_dirty(position: Vector3i) -> void:
+func _water_mark_mesh_dirty(
+	position: Vector3i
+) -> void:
 	var chunk_coord := world_to_chunk(
 		Vector3(position.x, position.y, position.z)
 	)
@@ -339,8 +343,7 @@ func _water_set(
 		false
 	)
 
-	# A failed write can happen when a target chunk is not loaded.
-	# Do not keep an unloaded position alive in the fluid queue.
+	# A failed write means the destination chunk is not currently loaded.
 	if _water_get(position) != block_id:
 		return false
 
@@ -354,41 +357,90 @@ func _water_count_source_neighbors(
 ) -> int:
 	var count: int = 0
 
-	var offsets := [
+	var offsets: Array[Vector3i] = [
 		Vector3i(-1, 0, 0),
 		Vector3i(1, 0, 0),
 		Vector3i(0, 0, -1),
 		Vector3i(0, 0, 1)
 	]
 
-	for offset in offsets:
+	for offset: Vector3i in offsets:
 		if _water_get(position + offset) == WATER:
 			count += 1
 
 	return count
 
 
+func _water_is_replaceable(
+	block_id: int
+) -> bool:
+	# BlockCraft currently has full solid blocks plus air/water. This is
+	# equivalent to Minecraft's canHoldAnyFluid()/canPassThroughWall()
+	# rules for the blocks that exist in this project.
+	return (
+		block_id == AIR
+		or _is_water_flowing(block_id)
+		or block_id == WATER_FALLING
+	)
+
+
+func _water_can_pass_through(
+	position: Vector3i
+) -> bool:
+	var block_id: int = _water_get(position)
+
+	# Water cannot flow into/through a source block.
+	if block_id == WATER:
+		return false
+
+	return _water_is_replaceable(block_id)
+
+
+func _water_is_hole(
+	position: Vector3i
+) -> bool:
+	# Minecraft's isWaterHole() asks whether this position can pass fluid
+	# downward. An air cell above air is an immediate hole; an existing
+	# water cell also counts as a valid fluid continuation.
+	if not _water_can_pass_through(position):
+		return false
+
+	var below: Vector3i = (
+		position + Vector3i(0, -1, 0)
+	)
+	var below_id: int = _water_get(below)
+
+	return (
+		below_id == AIR
+		or _is_water(below_id)
+	)
+
+
 func _water_try_source_conversion(
 	position: Vector3i
 ) -> bool:
-	var current := _water_get(position)
+	var current: int = _water_get(position)
 
-	if (
-		current != AIR
-		and not _is_water_flowing(current)
-	):
+	if current != AIR and not _is_water_flowing(current):
 		return false
 
 	if _water_count_source_neighbors(position) < 2:
 		return false
 
-	var below := _water_get(
+	var below: int = _water_get(
 		position + Vector3i(0, -1, 0)
 	)
 
-	# Minecraft also permits source conversion when the block below
-	# is another water source.
-	if below == AIR or (_is_water(below) and below != WATER):
+	# Java water has source conversion enabled by default. A source may
+	# form when at least two horizontal source neighbors surround a cell
+	# whose floor is solid or another source.
+	if (
+		below == AIR
+		or (
+			_is_water(below)
+			and below != WATER
+		)
+	):
 		return false
 
 	return _water_set(
@@ -397,85 +449,12 @@ func _water_try_source_conversion(
 	)
 
 
-func _water_has_upstream_supply(
-	position: Vector3i,
-	current_level: int
-) -> bool:
-	var above := _water_get(
-		position + Vector3i(0, 1, 0)
-	)
-
-	if (
-		above == WATER
-		or above == WATER_FALLING
-	):
-		return true
-
-	if _is_water_flowing(above):
-		var above_level := _water_flow_level(above)
-
-		if above_level < current_level:
-			return true
-
-	if current_level <= 0:
-		return true
-
-	var offsets := [
-		Vector3i(-1, 0, 0),
-		Vector3i(1, 0, 0),
-		Vector3i(0, 0, -1),
-		Vector3i(0, 0, 1)
-	]
-
-	for offset in offsets:
-		var neighbor := _water_get(
-			position + offset
-		)
-
-		if neighbor == WATER:
-			return true
-
-		if _is_water_flowing(neighbor):
-			var neighbor_level := _water_flow_level(
-				neighbor
-			)
-
-			if neighbor_level < current_level:
-				return true
-
-	return false
-
-
-func _water_amount(block_id: int) -> int:
-	if block_id == WATER or block_id == WATER_FALLING:
-		return 8
-
-	if _is_water_flowing(block_id):
-		return 8 - _water_flow_level(block_id)
-
-	return 0
-
-
-func _water_block_for_amount(amount: int) -> int:
-	if amount >= 8:
-		return WATER
-
-	if amount <= 0:
-		return AIR
-
-	return WATER_FLOW_1 + clampi(
-		8 - amount - 1,
-		0,
-		6
-	)
-
-
-func _water_is_solid_below(position: Vector3i) -> bool:
-	var block_id := _water_get(position)
-	return block_id != AIR and not _is_water(block_id)
-
-
-func _water_new_state(position: Vector3i) -> int:
+func _water_new_state(
+	position: Vector3i
+) -> int:
+	# This is FlowingFluid.getNewLiquid(): inspect all four horizontal
+	# neighbors, count sources, take the strongest neighbor amount,
+	# then resolve source conversion, falling state, or level decrease.
 	var source_count: int = 0
 	var max_amount: int = 0
 
@@ -487,38 +466,43 @@ func _water_new_state(position: Vector3i) -> int:
 	]
 
 	for offset: Vector3i in offsets:
-		var neighbor_id := _water_get(position + offset)
+		var neighbor_id: int = _water_get(
+			position + offset
+		)
+
+		if not _is_water(neighbor_id):
+			continue
 
 		if neighbor_id == WATER:
 			source_count += 1
-			max_amount = 8
-		elif _is_water_flowing(neighbor_id):
-			max_amount = maxi(
-				max_amount,
-				_water_amount(neighbor_id)
-			)
-		elif neighbor_id == WATER_FALLING:
-			# A falling column is still full-strength water and can
-			# feed a horizontal flow when it reaches a surface.
-			max_amount = 8
 
-	# Two or more horizontal source blocks create a new source when
-	# this position sits on solid ground or another source.
+		max_amount = maxi(
+			max_amount,
+			_water_amount(neighbor_id)
+		)
+
 	if source_count >= 2:
-		var below := position + Vector3i(0, -1, 0)
-		var below_id := _water_get(below)
-		if _water_is_solid_below(below) or below_id == WATER:
+		var below_id: int = _water_get(
+			position + Vector3i(0, -1, 0)
+		)
+
+		if below_id != AIR and (
+			below_id == WATER
+			or not _is_water(below_id)
+		):
 			return WATER
 
-	# Any water directly above makes this a falling fluid state.
-	var above := _water_get(
+	var above_id: int = _water_get(
 		position + Vector3i(0, 1, 0)
 	)
-	if _is_water(above):
+
+	if _is_water(above_id):
 		return WATER_FALLING
 
-	# Horizontal flow loses one level of strength per block.
-	var next_amount: int = max_amount - 1
+	var next_amount: int = (
+		max_amount - 1
+	)
+
 	if next_amount <= 0:
 		return AIR
 
@@ -531,6 +515,7 @@ func _water_slope_distance(
 	remaining_steps: int,
 	cache: Dictionary
 ) -> int:
+	# Minecraft checks at most four blocks for a lower hole.
 	var cache_key := (
 		"%d,%d,%d|%d,%d|%d" % [
 			position.x,
@@ -545,10 +530,9 @@ func _water_slope_distance(
 	if cache.has(cache_key):
 		return int(cache[cache_key])
 
-	var below := position + Vector3i(0, -1, 0)
-	if _water_get(below) == AIR:
-		cache[cache_key] = 0
-		return 0
+	if _water_is_hole(position):
+		cache[cache_key] = remaining_steps
+		return remaining_steps
 
 	if remaining_steps <= 0:
 		cache[cache_key] = 1000
@@ -566,17 +550,14 @@ func _water_slope_distance(
 		if direction == incoming_direction:
 			continue
 
-		var next_position := position + direction
-		var next_id := _water_get(next_position)
+		var next_position: Vector3i = (
+			position + direction
+		)
 
-		if (
-			next_id != AIR
-			and not _is_water_flowing(next_id)
-			and next_id != WATER_FALLING
-		):
+		if not _water_can_pass_through(next_position):
 			continue
 
-		var distance := _water_slope_distance(
+		var distance: int = _water_slope_distance(
 			next_position,
 			-direction,
 			remaining_steps - 1,
@@ -586,17 +567,22 @@ func _water_slope_distance(
 		if distance < best:
 			best = distance
 
-	cache[cache_key] = 1000 if best >= 1000 else best + 1
-	return int(cache[cache_key])
+	cache[cache_key] = best
+	return best
 
 
 func _water_spread_horizontal(
 	position: Vector3i,
 	current_id: int
 ) -> void:
-	var current_amount: int = _water_amount(current_id)
+	var spread_amount: int = (
+		_water_amount(current_id) - 1
+	)
 
-	if current_amount <= 1:
+	if current_id == WATER_FALLING:
+		spread_amount = 7
+
+	if spread_amount <= 0:
 		return
 
 	var directions: Array[Vector3i] = [
@@ -606,32 +592,29 @@ func _water_spread_horizontal(
 		Vector3i(0, 0, 1)
 	]
 
-	# Minecraft's spreadToSides() asks getSpread() for the directions
-	# that have the shortest path to a water hole. A flat surface is
-	# still valid when every direction has the maximum slope distance.
 	var best_distance: int = 1000
 	var best_directions: Array[Vector3i] = []
 	var cache: Dictionary = {}
 
+	# This mirrors FlowingFluid.getSpread(). Existing water is considered
+	# when determining the shortest path, but water does not replace water.
 	for direction: Vector3i in directions:
-		var target: Vector3i = position + direction
+		var target: Vector3i = (
+			position + direction
+		)
 		var target_id: int = _water_get(target)
 
-		# A source is not replaceable. Air and non-source water are.
-		if target_id == WATER:
+		if not _water_can_pass_through(target):
 			continue
 
-		if (
-			target_id != AIR
-			and not _is_water_flowing(target_id)
-			and target_id != WATER_FALLING
-		):
+		var desired_id: int = _water_new_state(target)
+
+		if desired_id == AIR:
 			continue
 
 		var distance: int = 0
-		var below: Vector3i = target + Vector3i(0, -1, 0)
 
-		if _water_get(below) != AIR:
+		if not _water_is_hole(target):
 			distance = _water_slope_distance(
 				target,
 				-direction,
@@ -646,55 +629,71 @@ func _water_spread_horizontal(
 		elif distance == best_distance:
 			best_directions.append(direction)
 
-	if best_directions.is_empty():
-		return
-
 	for direction: Vector3i in best_directions:
-		var target: Vector3i = position + direction
+		var target: Vector3i = (
+			position + direction
+		)
 		var target_id: int = _water_get(target)
 
-		if target_id == WATER:
+		# WaterFluid.canBeReplacedWith() rejects replacing another water
+		# block horizontally, so only an empty cell is actually written.
+		if target_id != AIR:
 			continue
 
-		# Minecraft computes the destination fluid state from the
-		# destination's own neighbors instead of copying the source level.
 		var desired_id: int = _water_new_state(target)
 
-		# Empty destinations stay empty; an existing flowing/falling cell
-		# will recalculate itself on its own scheduled fluid tick.
-		if desired_id == AIR or desired_id == target_id:
-			continue
-
-		if (
-			target_id == AIR
-			or _is_water_flowing(target_id)
-			or target_id == WATER_FALLING
-		):
-			_water_set(target, desired_id)
+		if desired_id != AIR:
+			_water_set(
+				target,
+				desired_id
+			)
 
 
-func _water_process_source(position: Vector3i) -> void:
-	var below_position: Vector3i = (
+func _water_process_spread(
+	position: Vector3i,
+	current_id: int
+) -> void:
+	# This is FlowingFluid.spread(): downward flow has absolute priority.
+	var below: Vector3i = (
 		position + Vector3i(0, -1, 0)
 	)
-	var below: int = _water_get(below_position)
+	var below_id: int = _water_get(below)
 
-	if below == AIR:
-		_water_set(
-			below_position,
-			WATER_FALLING
-		)
+	var can_flow_down: bool = (
+		_water_can_pass_through(below)
+		and below_id != WATER
+	)
 
-		# Like Minecraft, a source that is flowing downward only also
-		# spreads sideways when at least three horizontal source blocks
-		# support it.
-		if _water_count_source_neighbors(position) < 3:
+	if can_flow_down:
+		var desired_id: int = _water_new_state(below)
+
+		if desired_id != AIR:
+			if below_id == AIR:
+				_water_set(
+					below,
+					desired_id
+				)
+
+			# Water may also spread sideways in the same tick after a
+			# successful downward flow when three source neighbors exist.
+			if _water_count_source_neighbors(position) >= 3:
+				_water_spread_horizontal(
+					position,
+					current_id
+				)
 			return
 
-	_water_spread_horizontal(
-		position,
-		WATER
-	)
+	# Minecraft spreads sideways when downward flow is blocked. A source
+	# always spreads; flowing water spreads when it is not sitting over a
+	# water hole.
+	if (
+		current_id == WATER
+		or not _water_is_hole(position)
+	):
+		_water_spread_horizontal(
+			position,
+			current_id
+		)
 
 
 func _process_water_position(
@@ -702,72 +701,31 @@ func _process_water_position(
 ) -> void:
 	var current: int = _water_get(position)
 
-	# Source conversion is the infinite-water rule used by Minecraft.
-	if (
-		current == AIR
-		and _water_try_source_conversion(position)
-	):
-		current = WATER
+	# FlowingFluid.tick() recalculates every non-source fluid state first,
+	# including falling water.
+	if current != WATER:
+		var updated_state: int = _water_new_state(position)
 
-	if current == WATER:
-		_water_process_source(position)
-		return
-
-	# Falling water keeps moving straight down while the block below is
-	# open. Once it reaches a surface, it becomes a horizontal source of
-	# flow and spreads from there.
-	if current == WATER_FALLING:
-		var below_falling: Vector3i = (
-			position + Vector3i(0, -1, 0)
-		)
-
-		if _water_get(below_falling) == AIR:
+		if updated_state == AIR:
 			_water_set(
-				below_falling,
-				WATER_FALLING
+				position,
+				AIR
 			)
 			return
 
-		_water_spread_horizontal(
-			position,
-			WATER_FALLING
-		)
-		return
+		if updated_state != current:
+			_water_set(
+				position,
+				updated_state
+			)
+			current = updated_state
 
-	if not _is_water_flowing(current):
-		return
-
-	# Flowing water first checks downward flow, matching Minecraft's
-	# FlowingFluid.tick() order.
-	var below_position: Vector3i = (
-		position + Vector3i(0, -1, 0)
-	)
-	var below: int = _water_get(below_position)
-
-	if below == AIR:
-		_water_set(
-			below_position,
-			WATER_FALLING
-		)
-		return
-
-	# Recalculate the flowing level from horizontal neighbors after its
-	# downward path is blocked.
-	var updated_state: int = _water_new_state(position)
-
-	if updated_state == AIR:
-		_water_set(position, AIR)
-		return
-
-	if updated_state != current:
-		_water_set(position, updated_state)
-
-		if updated_state == WATER:
+		# If it became a source, the source does not need another level
+		# calculation during this tick, but it still performs spread().
+		if current == AIR:
 			return
 
-		current = updated_state
-
-	_water_spread_horizontal(
+	_water_process_spread(
 		position,
 		current
 	)
