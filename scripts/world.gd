@@ -535,8 +535,27 @@ func process_water_queue(delta: float) -> void:
 		processed += 1
 
 
+func _water_cell_has_open_destination(
+	position: Vector3i
+) -> bool:
+	var offsets: Array[Vector3i] = [
+		Vector3i(0, -1, 0),
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for offset: Vector3i in offsets:
+		if _water_get(position + offset) == AIR:
+			return true
+
+	return false
+
+
 func enqueue_water_updates_for_chunk(
-	chunk_coord: Vector2i
+	chunk_coord: Vector2i,
+	restore_saved_flow: bool = false
 ) -> void:
 	if not loaded_chunks.has(chunk_coord):
 		return
@@ -546,22 +565,54 @@ func enqueue_water_updates_for_chunk(
 	if not chunk.is_generated:
 		return
 
-	const SEA_LEVEL: int = 50
+	if not restore_saved_flow:
+		# Newly generated terrain starts with source water at sea level.
+		# Only exposed source cells need to enter the simulation.
+		const SEA_LEVEL: int = 50
 
+		for x in range(CHUNK_SIZE):
+			for z in range(CHUNK_SIZE):
+				if chunk.get_block(x, SEA_LEVEL, z) != WATER:
+					continue
+
+				var position := Vector3i(
+					chunk_coord.x * CHUNK_SIZE + x,
+					SEA_LEVEL,
+					chunk_coord.y * CHUNK_SIZE + z
+				)
+
+				if _water_cell_has_open_destination(position):
+					_water_schedule(position)
+
+		return
+
+	# Saved chunks may contain partially-spread or falling water below
+	# sea level. Restore only active water frontiers rather than every
+	# water voxel in the chunk.
 	for x in range(CHUNK_SIZE):
 		for z in range(CHUNK_SIZE):
-			if chunk.get_block(
-				x,
-				SEA_LEVEL,
-				z
-			) == WATER:
-				_water_schedule(
-					Vector3i(
+			for y in range(CHUNK_HEIGHT):
+				var block_id: int = chunk.get_block(x, y, z)
+
+				if block_id == WATER_FALLING:
+					_water_schedule(Vector3i(
 						chunk_coord.x * CHUNK_SIZE + x,
-						SEA_LEVEL,
+						y,
 						chunk_coord.y * CHUNK_SIZE + z
-					)
+					))
+					continue
+
+				if not _is_water_flowing(block_id):
+					continue
+
+				var position := Vector3i(
+					chunk_coord.x * CHUNK_SIZE + x,
+					y,
+					chunk_coord.y * CHUNK_SIZE + z
 				)
+
+				if _water_cell_has_open_destination(position):
+					_water_schedule(position)
 
 
 # ===================================================================
@@ -802,6 +853,26 @@ func _create_celestial_visual(
 
 	add_child(visual)
 	return visual
+
+
+func set_time_preset(preset: String) -> bool:
+	var preset_minutes: Dictionary = {
+		"sunrise": 360.0,
+		"day": 480.0,
+		"noon": 720.0,
+		"evening": 1020.0,
+		"sunset": 1080.0,
+		"night": 1200.0,
+		"midnight": 0.0
+	}
+
+	var key := preset.to_lower()
+
+	if not preset_minutes.has(key):
+		return false
+
+	world_time_minutes = float(preset_minutes[key])
+	return true
 
 
 func _update_day_night(delta: float) -> void:
@@ -1793,7 +1864,8 @@ func load_chunk(
 		# Only source cells at sea level are queued, then normal water logic
 		# propagates the update outward without creating a large backlog.
 		enqueue_water_updates_for_chunk(
-			chunk_coord
+			chunk_coord,
+			true
 		)
 
 		enqueue_mesh_chunk(chunk_coord)
@@ -1923,10 +1995,13 @@ func process_generation_queue() -> void:
 			generated_data
 		)
 
-		# Generated terrain water is already filled to the world water
-		# level. Do not enqueue every water source for simulation here;
-		# that creates a large backlog as new chunks are explored.
-		# Water will still be scheduled by actual block changes.
+		# Kick the water simulation from exposed source cells only.
+		# Interior ocean water needs no update until an exposed frontier
+		# reaches it, keeping chunk generation from creating a huge queue.
+		enqueue_water_updates_for_chunk(
+			chunk_coord
+		)
+
 		enqueue_mesh_chunk(
 			chunk_coord
 		)
