@@ -569,6 +569,14 @@ static func _add_water_faces(
 	var origin := Vector3(x, y, z)
 	var height: float = water_height(block_id)
 
+	# Water's visible surface sits one pixel below a full block.
+	# Keep that reduction for top faces, but side faces of source/falling
+	# water must still reach the full block height so stacked water does
+	# not leave a one-pixel empty stripe between layers.
+	var side_height: float = height
+	if block_id == WATER or block_id == WATER_FALLING:
+		side_height = 1.0
+
 	var above: int = snapshot[
 		padded_index(x, y + 1, z)
 	]
@@ -610,7 +618,7 @@ static func _add_water_faces(
 			origin,
 			FACE_FORWARD,
 			Vector3.FORWARD,
-			height,
+			side_height,
 			false
 		)
 
@@ -625,7 +633,7 @@ static func _add_water_faces(
 			origin,
 			FACE_BACK,
 			Vector3.BACK,
-			height,
+			side_height,
 			false
 		)
 
@@ -640,7 +648,7 @@ static func _add_water_faces(
 			origin,
 			FACE_LEFT,
 			Vector3.LEFT,
-			height,
+			side_height,
 			false
 		)
 
@@ -655,7 +663,7 @@ static func _add_water_faces(
 			origin,
 			FACE_RIGHT,
 			Vector3.RIGHT,
-			height,
+			side_height,
 			false
 		)
 
