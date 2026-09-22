@@ -298,10 +298,16 @@ func _water_schedule(
 
 	water_scheduled_ticks[block_position] = scheduled_tick
 
-	var bucket: Array[Vector3i] = water_schedule_buckets.get(
+	var bucket: Array[Vector3i] = []
+	var existing_bucket = water_schedule_buckets.get(
 		scheduled_tick,
-		[]
+		null
 	)
+
+	if existing_bucket is Array:
+		for existing_position in existing_bucket:
+			bucket.append(existing_position)
+
 	bucket.append(block_position)
 	water_schedule_buckets[scheduled_tick] = bucket
 
