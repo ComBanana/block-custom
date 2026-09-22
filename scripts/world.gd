@@ -198,6 +198,12 @@ var near_mesh_queued: Dictionary = {}
 var far_mesh_queue: Array[Vector2i] = []
 var far_mesh_queued: Dictionary = {}
 
+# Water visual refreshes intentionally run below normal streaming meshes.
+# Water simulation can stay responsive without stealing the mesh pipeline
+# from chunks that still need to appear around the player.
+var water_mesh_queue: Array[Vector2i] = []
+var water_mesh_queued: Dictionary = {}
+
 var active_mesh_priority: int = PRIORITY_FAR
 
 
@@ -850,6 +856,13 @@ func _process_water_position(
 
 
 func process_water_queue(delta: float) -> void:
+	# The player cannot see or interact with the world yet. Keeping fluid
+	# simulation completely paused here prevents the loading pipeline from
+	# sharing main-thread time with thousands of queued water cells.
+	if not player_spawned:
+		water_tick_accumulator = 0.0
+		return
+
 	water_tick_accumulator += delta
 
 	if water_tick_accumulator < water_tick_interval:
@@ -895,8 +908,10 @@ func process_water_queue(delta: float) -> void:
 		processed += 1
 
 	# Refresh each affected chunk at most once per water tick.
+	# These are deliberately sent to the low-priority water-mesh queue so
+	# streaming chunks stay ahead of fluid visuals.
 	for chunk_coord in water_dirty_mesh_chunks:
-		enqueue_mesh_chunk(chunk_coord)
+		enqueue_water_mesh_chunk(chunk_coord)
 	water_dirty_mesh_chunks.clear()
 
 	# Keep queue removal O(1) while avoiding an ever-growing backing array.
@@ -1562,6 +1577,60 @@ func _update_stream_prediction() -> void:
 
 func _available_worker_budget() -> int:
 	return maxi(1, OS.get_processor_count() - 1)
+
+
+func _generation_submit_limit() -> int:
+	var desired_generation := _generation_task_limit()
+	var desired_mesh := _mesh_task_limit()
+	var total_limit := _available_worker_budget()
+
+	if desired_generation <= 0 or total_limit <= 0:
+		return 0
+
+	var desired_total := desired_generation + desired_mesh
+
+	if desired_total <= 0:
+		return 0
+
+	# Split the shared worker pool according to the configured demand,
+	# instead of letting generation and meshing each reserve the whole pool.
+	var generation_share := floori(
+		float(total_limit * desired_generation) /
+		float(desired_total)
+	)
+	generation_share = clampi(
+		generation_share,
+		1,
+		mini(desired_generation, total_limit)
+	)
+
+	var available_slots := maxi(
+		0,
+		total_limit - mesh_tasks.size()
+	)
+
+	return mini(
+		generation_share,
+		available_slots
+	)
+
+
+func _mesh_submit_limit() -> int:
+	var desired_mesh := _mesh_task_limit()
+	var total_limit := _available_worker_budget()
+
+	if desired_mesh <= 0:
+		return 0
+
+	var available_slots := maxi(
+		0,
+		total_limit - generation_tasks.size()
+	)
+
+	return mini(
+		desired_mesh,
+		available_slots
+	)
 
 
 func _generation_task_limit() -> int:
@@ -2393,7 +2462,7 @@ func process_generation_queue() -> void:
 	# SUBMIT NEW GENERATION TASKS
 	# ---------------------------------------------------------------
 
-	var generation_limit := _generation_task_limit()
+	var generation_limit := _generation_submit_limit()
 	if generation_limit <= 0:
 		return
 
@@ -2554,6 +2623,10 @@ func enqueue_mesh_chunk(
 	if not chunk.is_generated:
 		return
 
+	# A normal chunk/neighbor/player rebuild contains the latest water state,
+	# so any pending water-only visual refresh for this chunk is redundant.
+	water_mesh_queued.erase(chunk_coord)
+
 	# Never cancel a mesh worker just because fluid changed the chunk.
 	# Let the current result finish, then queue one replacement build.
 	if chunk.mesh_building:
@@ -2678,6 +2751,58 @@ func _loading_mesh_neighbors_ready(
 
 
 # ===================================================================
+# Water visual mesh queue
+# ===================================================================
+
+func enqueue_water_mesh_chunk(
+	chunk_coord: Vector2i
+) -> void:
+
+	if not player_spawned:
+		return
+
+	if not loaded_chunks.has(chunk_coord):
+		return
+
+	if not _is_chunk_needed(chunk_coord):
+		return
+
+	var chunk = loaded_chunks[chunk_coord]
+
+	if not chunk.is_generated:
+		return
+
+	# The normal mesh pipeline is responsible for chunks that have not
+	# produced their first valid mesh yet.
+	if not chunk.mesh_ready:
+		return
+
+	# A player edit is already queued with higher priority and will render
+	# the latest block state.
+	if player_edit_queued.has(chunk_coord):
+		return
+
+	if chunk.mesh_building:
+		chunk.water_mesh_rebuild_requested = true
+		return
+
+	if critical_mesh_queued.has(chunk_coord):
+		return
+
+	if near_mesh_queued.has(chunk_coord):
+		return
+
+	if far_mesh_queued.has(chunk_coord):
+		return
+
+	if water_mesh_queued.has(chunk_coord):
+		return
+
+	water_mesh_queue.append(chunk_coord)
+	water_mesh_queued[chunk_coord] = true
+
+
+# ===================================================================
 # Player edit queue
 # ===================================================================
 
@@ -2696,6 +2821,9 @@ func enqueue_player_edit(
 
 	if not chunk.is_generated:
 		return
+
+	# A player edit supersedes any pending water-only refresh.
+	water_mesh_queued.erase(chunk_coord)
 
 	# Cancel background mesh generation for this chunk.
 	if chunk.mesh_building:
@@ -2889,7 +3017,11 @@ func process_mesh_queue() -> void:
 
 		if chunk.mesh_rebuild_requested:
 			chunk.mesh_rebuild_requested = false
+			chunk.water_mesh_rebuild_requested = false
 			enqueue_mesh_chunk(result.chunk_coordinate)
+		elif chunk.water_mesh_rebuild_requested:
+			chunk.water_mesh_rebuild_requested = false
+			enqueue_water_mesh_chunk(result.chunk_coordinate)
 
 		generation_profiler.record(
 			"mesh_apply",
@@ -2904,7 +3036,7 @@ func process_mesh_queue() -> void:
 	# SUBMIT NEW WORK
 	# ---------------------------------------------------------------
 
-	var mesh_limit := _mesh_task_limit()
+	var mesh_limit := _mesh_submit_limit()
 	if mesh_limit <= 0:
 		return
 
@@ -2998,6 +3130,14 @@ func get_next_mesh_candidate() -> Vector2i:
 	if far != INVALID_CHUNK:
 		active_mesh_priority = PRIORITY_FAR
 		return far
+
+	var water := _take_best_mesh_candidate(
+		water_mesh_queue,
+		water_mesh_queued
+	)
+	if water != INVALID_CHUNK:
+		active_mesh_priority = PRIORITY_FAR
+		return water
 
 	return INVALID_CHUNK
 
@@ -3183,6 +3323,10 @@ func unload_chunk(
 	)
 
 	far_mesh_queued.erase(
+		chunk_coord
+	)
+
+	water_mesh_queued.erase(
 		chunk_coord
 	)
 
