@@ -32,12 +32,36 @@ class MeshSurface:
 	var uvs: PackedVector2Array = PackedVector2Array()
 	var indices: PackedInt32Array = PackedInt32Array()
 
+	static func _rotate_uv(
+		uv: Vector2,
+		rotation_steps: int
+	) -> Vector2:
+		match posmod(rotation_steps, 4):
+			1:
+				return Vector2(
+					1.0 - uv.y,
+					uv.x
+				)
+			2:
+				return Vector2(
+					1.0 - uv.x,
+					1.0 - uv.y
+				)
+			3:
+				return Vector2(
+					uv.y,
+					1.0 - uv.x
+				)
+			_:
+				return uv
+
 	func add_quad(
 		v0: Vector3,
 		v1: Vector3,
 		v2: Vector3,
 		v3: Vector3,
-		normal: Vector3
+		normal: Vector3,
+		uv_rotation_steps: int = 0
 	) -> void:
 		var base_index: int = vertices.size()
 
@@ -51,9 +75,6 @@ class MeshSurface:
 		normals.append(normal)
 		normals.append(normal)
 
-		# Keep the top of side textures at the top of the block.
-		# Each side face has a different vertex winding, so one generic
-		# UV order would rotate/flip the grass-side texture.
 		match normal:
 			Vector3.FORWARD, Vector3.RIGHT:
 				uvs.append(Vector2(0.0, 1.0))
@@ -72,6 +93,13 @@ class MeshSurface:
 				uvs.append(Vector2(1.0, 0.0))
 				uvs.append(Vector2(1.0, 1.0))
 				uvs.append(Vector2(0.0, 1.0))
+
+		if uv_rotation_steps != 0:
+			for i in range(4):
+				uvs[base_index + i] = _rotate_uv(
+					uvs[base_index + i],
+					uv_rotation_steps
+				)
 
 		indices.append(base_index)
 		indices.append(base_index + 1)
@@ -114,14 +142,16 @@ class MeshBuffer:
 		v1: Vector3,
 		v2: Vector3,
 		v3: Vector3,
-		normal: Vector3
+		normal: Vector3,
+		uv_rotation_steps: int = 0
 	) -> void:
 		surface_for_layer(layer).add_quad(
 			v0,
 			v1,
 			v2,
 			v3,
-			normal
+			normal,
+			uv_rotation_steps
 		)
 
 	func add_collision_quad(
@@ -173,7 +203,8 @@ static func build_from_blocks(
 	neg_x_blocks: PackedByteArray,
 	pos_x_blocks: PackedByteArray,
 	neg_z_blocks: PackedByteArray,
-	pos_z_blocks: PackedByteArray
+	pos_z_blocks: PackedByteArray,
+	chunk_coordinate: Vector2i = Vector2i.ZERO
 ) -> MeshBuffer:
 	var snapshot := PackedByteArray()
 	snapshot.resize(PADDED_VOLUME)
@@ -212,7 +243,7 @@ static func build_from_blocks(
 		0
 	)
 
-	return build(snapshot)
+	return build(snapshot, chunk_coordinate)
 
 
 static func _copy_center_blocks(
@@ -304,7 +335,10 @@ static func _copy_z_border(
 			] = neighbor_blocks[source_index]
 
 
-static func build(snapshot: PackedByteArray) -> MeshBuffer:
+static func build(
+	snapshot: PackedByteArray,
+	chunk_coordinate: Vector2i = Vector2i.ZERO
+) -> MeshBuffer:
 	var buffer := MeshBuffer.new()
 
 	for x in range(CHUNK_SIZE):
@@ -367,15 +401,70 @@ static func _layer_for_solid_face(
 			return 2
 
 
+static func _is_uniform_texture_block(block_id: int) -> bool:
+	var layer: int = _layer_for_solid_face(
+		block_id,
+		FACE_UP
+	)
+
+	return (
+		layer == _layer_for_solid_face(block_id, FACE_DOWN)
+		and layer == _layer_for_solid_face(block_id, FACE_FORWARD)
+		and layer == _layer_for_solid_face(block_id, FACE_BACK)
+		and layer == _layer_for_solid_face(block_id, FACE_LEFT)
+		and layer == _layer_for_solid_face(block_id, FACE_RIGHT)
+	)
+
+
+static func _texture_rotation_steps(
+	chunk_coordinate: Vector2i,
+	x: int,
+	y: int,
+	z: int
+) -> int:
+	# Hash world-space coordinates so the same block keeps the same
+	# rotation when its chunk is rebuilt or remeshed.
+	var world_x: int = (
+		chunk_coordinate.x * CHUNK_SIZE +
+		x
+	)
+	var world_z: int = (
+		chunk_coordinate.y * CHUNK_SIZE +
+		z
+	)
+
+	var value: int = (
+		world_x * 73428767
+		+ world_z * 912931
+		+ y * 19349663
+	)
+
+	value = value ^ (value >> 13)
+	value = value * 1274126177
+	value = value ^ (value >> 16)
+
+	return posmod(value, 4)
+
+
 static func _add_solid_faces(
 	snapshot: PackedByteArray,
 	x: int,
 	y: int,
 	z: int,
 	block_id: int,
-	buffer: MeshBuffer
+	buffer: MeshBuffer,
+	chunk_coordinate: Vector2i
 ) -> void:
 	var origin := Vector3(x, y, z)
+
+	var uv_rotation_steps: int = 0
+	if _is_uniform_texture_block(block_id):
+		uv_rotation_steps = _texture_rotation_steps(
+			chunk_coordinate,
+			x,
+			y,
+			z
+		)
 
 	var neighbor: int = snapshot[
 		padded_index(x, y + 1, z)
@@ -388,7 +477,8 @@ static func _add_solid_faces(
 			FACE_UP,
 			Vector3.UP,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 	neighbor = snapshot[
@@ -402,7 +492,8 @@ static func _add_solid_faces(
 			FACE_DOWN,
 			Vector3.DOWN,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 	neighbor = snapshot[
@@ -416,7 +507,8 @@ static func _add_solid_faces(
 			FACE_FORWARD,
 			Vector3.FORWARD,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 	neighbor = snapshot[
@@ -430,7 +522,8 @@ static func _add_solid_faces(
 			FACE_BACK,
 			Vector3.BACK,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 	neighbor = snapshot[
@@ -444,7 +537,8 @@ static func _add_solid_faces(
 			FACE_LEFT,
 			Vector3.LEFT,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 	neighbor = snapshot[
@@ -458,7 +552,8 @@ static func _add_solid_faces(
 			FACE_RIGHT,
 			Vector3.RIGHT,
 			1.0,
-			true
+			true,
+			uv_rotation_steps
 		)
 
 
@@ -571,7 +666,8 @@ static func _add_face(
 	face: int,
 	normal: Vector3,
 	height: float,
-	include_collision: bool
+	include_collision: bool,
+	uv_rotation_steps: int = 0
 ) -> void:
 	var v0: Vector3
 	var v1: Vector3
@@ -621,7 +717,8 @@ static func _add_face(
 		v1,
 		v2,
 		v3,
-		normal
+		normal,
+		uv_rotation_steps
 	)
 
 	if include_collision:
