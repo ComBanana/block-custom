@@ -208,10 +208,6 @@ func _is_water(block_id: int) -> bool:
 	return block_id >= WATER and block_id <= WATER_FALLING
 
 
-func _is_water_source(block_id: int) -> bool:
-	return block_id == WATER
-
-
 func _is_water_falling(block_id: int) -> bool:
 	return block_id == WATER_FALLING
 
@@ -233,16 +229,6 @@ func _water_flow_level(block_id: int) -> int:
 	return -1
 
 
-func _water_block_for_level(level: int) -> int:
-	if level <= 0:
-		return WATER
-
-	return WATER_FLOW_1 + mini(
-		level - 1,
-		6
-	)
-
-
 func _water_schedule(position: Vector3i) -> void:
 	if position.y < 0 or position.y >= CHUNK_HEIGHT:
 		return
@@ -250,15 +236,6 @@ func _water_schedule(position: Vector3i) -> void:
 	if not water_updates_queued.has(position):
 		water_update_queue.append(position)
 		water_updates_queued[position] = true
-
-
-func _water_schedule_neighbors(position: Vector3i) -> void:
-	_water_schedule(position + Vector3i(0, -1, 0))
-	_water_schedule(position + Vector3i(0, 1, 0))
-	_water_schedule(position + Vector3i(-1, 0, 0))
-	_water_schedule(position + Vector3i(1, 0, 0))
-	_water_schedule(position + Vector3i(0, 0, -1))
-	_water_schedule(position + Vector3i(0, 0, 1))
 
 
 func _water_get(position: Vector3i) -> int:
@@ -291,6 +268,55 @@ func _water_schedule_changed(
 		var neighbor: Vector3i = position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
+
+
+func _wake_water_for_loaded_chunk(
+	chunk_coord: Vector2i
+) -> void:
+	# Streaming can expose a new destination beside water that was
+	# already simulated while the neighboring chunk was unloaded.
+	# Wake both boundaries so water continues across chunk edges.
+	var min_x: int = chunk_coord.x * CHUNK_SIZE
+	var max_x: int = min_x + CHUNK_SIZE - 1
+	var min_z: int = chunk_coord.y * CHUNK_SIZE
+	var max_z: int = min_z + CHUNK_SIZE - 1
+
+	for y in range(CHUNK_HEIGHT):
+		for x in range(min_x, max_x + 1):
+			var north: Vector3i = Vector3i(x, y, min_z)
+			var south: Vector3i = Vector3i(x, y, max_z)
+
+			if _is_water(_water_get(north)):
+				_water_schedule(north)
+			if _is_water(_water_get(south)):
+				_water_schedule(south)
+
+		var north_outside: Vector3i = Vector3i(x, y, min_z - 1)
+			var south_outside: Vector3i = Vector3i(x, y, max_z + 1)
+
+			if _is_water(_water_get(north_outside)):
+				_water_schedule(north_outside)
+			if _is_water(_water_get(south_outside)):
+				_water_schedule(south_outside)
+
+		for z in range(min_z, max_z + 1):
+			var west: Vector3i = Vector3i(min_x, y, z)
+			var east: Vector3i = Vector3i(max_x, y, z)
+
+			if _is_water(_water_get(west)):
+				_water_schedule(west)
+			if _is_water(_water_get(east)):
+				_water_schedule(east)
+
+			var west_outside: Vector3i = Vector3i(min_x - 1, y, z)
+			var east_outside: Vector3i = Vector3i(max_x + 1, y, z)
+
+			if _is_water(_water_get(west_outside)):
+				_water_schedule(west_outside)
+			if _is_water(_water_get(east_outside)):
+				_water_schedule(east_outside)
+
+
 
 
 func _water_mark_mesh_dirty(
@@ -413,39 +439,6 @@ func _water_is_hole(
 	return (
 		below_id == AIR
 		or _is_water(below_id)
-	)
-
-
-func _water_try_source_conversion(
-	position: Vector3i
-) -> bool:
-	var current: int = _water_get(position)
-
-	if current != AIR and not _is_water_flowing(current):
-		return false
-
-	if _water_count_source_neighbors(position) < 2:
-		return false
-
-	var below: int = _water_get(
-		position + Vector3i(0, -1, 0)
-	)
-
-	# Java water has source conversion enabled by default. A source may
-	# form when at least two horizontal source neighbors surround a cell
-	# whose floor is solid or another source.
-	if (
-		below == AIR
-		or (
-			_is_water(below)
-			and below != WATER
-		)
-	):
-		return false
-
-	return _water_set(
-		position,
-		WATER
 	)
 
 
@@ -2126,6 +2119,9 @@ func load_chunk(
 			chunk_coord,
 			true
 		)
+		_wake_water_for_loaded_chunk(
+			chunk_coord
+		)
 
 		enqueue_mesh_chunk(chunk_coord)
 		enqueue_neighbor_meshes(chunk_coord)
@@ -2258,6 +2254,9 @@ func process_generation_queue() -> void:
 		# Interior ocean water needs no update until an exposed frontier
 		# reaches it, keeping chunk generation from creating a huge queue.
 		enqueue_water_updates_for_chunk(
+			chunk_coord
+		)
+		_wake_water_for_loaded_chunk(
 			chunk_coord
 		)
 
