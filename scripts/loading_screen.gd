@@ -9,13 +9,13 @@ func _ready() -> void:
 	progress_bar.max_value = 100.0
 	progress_bar.value = 0.0
 
-	status_label.text = "Generating nearby terrain..."
+	status_label.text = "Preparing world..."
 
 
 func set_progress(completed: int, total: int) -> void:
 	if total <= 0:
 		progress_bar.value = 0.0
-		status_label.text = "Generating nearby terrain..."
+		status_label.text = "Preparing world..."
 		return
 
 	var percentage: float = (
@@ -25,7 +25,7 @@ func set_progress(completed: int, total: int) -> void:
 	progress_bar.value = percentage
 
 	status_label.text = (
-		"Generating nearby terrain... %d%%"
+		"Preparing world... %d%%"
 		% roundi(percentage)
 	)
 
