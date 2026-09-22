@@ -497,6 +497,10 @@ func _water_new_state(position: Vector3i) -> int:
 				max_amount,
 				_water_amount(neighbor_id)
 			)
+		elif neighbor_id == WATER_FALLING:
+			# A falling column is still full-strength water and can
+			# feed a horizontal flow when it reaches a surface.
+			max_amount = 8
 
 	# Two or more horizontal source blocks create a new source when
 	# this position sits on solid ground or another source.
