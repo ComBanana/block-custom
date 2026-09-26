@@ -3082,6 +3082,9 @@ func _loading_mesh_neighbors_ready(
 func _capture_render_region_snapshot(
 	chunk_coord: Vector2i
 ) -> Dictionary:
+	if _is_chunk_teleport_required(chunk_coord):
+		return {}
+
 	if not loaded_chunks.has(chunk_coord):
 		return {}
 
