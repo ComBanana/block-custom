@@ -261,6 +261,25 @@ func _water_amount(block_id: int) -> int:
 	return 0
 
 
+func get_water_surface_y_at_world(world_position: Vector3) -> float:
+	# Return the actual fluid surface for the water state occupying this voxel.
+	# Flowing water uses its amount (1..7)/8; source and falling water use 15/16.
+	var block_position := Vector3i(
+		floori(world_position.x),
+		floori(world_position.y),
+		floori(world_position.z)
+	)
+	var block_id: int = _water_get(block_position)
+
+	if not _is_water(block_id):
+		return -INF
+
+	if block_id == WATER or block_id == WATER_FALLING:
+		return float(block_position.y) + 15.0 / 16.0
+
+	return float(block_position.y) + float(_water_amount(block_id)) / 8.0
+
+
 func _water_block_for_amount(amount: int) -> int:
 	if amount >= 8:
 		return WATER
