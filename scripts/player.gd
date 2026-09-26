@@ -29,10 +29,6 @@ extends CharacterBody3D
 @export var water_swim_drag: float = 0.9
 @export var water_vertical_drag: float = 0.8
 
-# Java Edition only lets a player use a normal ground jump
-# when the fluid depth is at or below this threshold.
-@export var water_fluid_jump_threshold: float = 0.4
-
 # Java Edition's fluid collision escape sets Y velocity to
 # 0.3 blocks/tick when a horizontal collision has enough room above.
 @export var water_edge_jump_velocity_per_tick: float = 0.45
@@ -662,14 +658,6 @@ func _submerged_depth() -> float:
 	)
 
 
-func _is_shallow_water_for_ground_jump() -> bool:
-	if is_head_in_water():
-		return false
-	if _submerged_depth() > water_fluid_jump_threshold:
-		return false
-	return is_on_floor()
-
-
 func _can_water_shore_jump(direction: Vector3) -> bool:
 	var horizontal_direction := Vector3(direction.x, 0.0, direction.z)
 	if horizontal_direction.length_squared() <= 0.0001:
@@ -892,12 +880,9 @@ func _physics_process(delta: float) -> void:
 	# miss that support and incorrectly disable jumping.
 	var grounded_for_jump: bool = is_on_floor()
 
-	var shallow_water_ground_jump: bool = (
-		grounded_for_jump
-		and _is_shallow_water_for_ground_jump()
-	)
-
-	var use_water_physics: bool = in_water and not shallow_water_ground_jump
+	# Any actual water overlap uses water physics, even when the player
+	# is only standing in a shallow Flow 1..7 state.
+	var use_water_physics: bool = in_water
 
 	if use_water_physics:
 		var water_drag: float = water_swim_drag if swimming else water_normal_drag
