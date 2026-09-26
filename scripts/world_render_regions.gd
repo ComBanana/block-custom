@@ -133,27 +133,84 @@ func update_center(
 	center_chunk = new_center_chunk
 
 	var changed_chunks: Array[Vector2i] = []
+	var delta_x := abs(new_center_chunk.x - old_center.x)
+	var delta_z := abs(new_center_chunk.y - old_center.y)
+	var full_scan_threshold := BATCH_DISTANCE * 2 + 2
 
-	for chunk_variant in present_chunks.keys():
-		var chunk_coordinate: Vector2i = chunk_variant
+	if (
+		delta_x > full_scan_threshold
+		or delta_z > full_scan_threshold
+	):
+		# Large teleports can move the batching boundary a long way.
+		# Only those rare moves need to inspect the full loaded set.
+		for chunk_variant in present_chunks.keys():
+			var chunk_coordinate: Vector2i = chunk_variant
 
-		var was_batched := _is_chunk_batched_for_center(
-			chunk_coordinate,
-			old_center
-		)
-		var is_batched := _is_chunk_batched_for_center(
-			chunk_coordinate,
-			center_chunk
-		)
+			var was_batched := _is_chunk_batched_for_center(
+				chunk_coordinate,
+				old_center
+			)
+			var is_batched := _is_chunk_batched_for_center(
+				chunk_coordinate,
+				center_chunk
+			)
 
-		if was_batched == is_batched:
-			continue
+			if was_batched == is_batched:
+				continue
 
-		changed_chunks.append(chunk_coordinate)
+			changed_chunks.append(chunk_coordinate)
 
-		_mark_region_dirty(
-			_region_coordinate_for_chunk(chunk_coordinate)
-		)
+			_mark_region_dirty(
+				_region_coordinate_for_chunk(chunk_coordinate)
+			)
+
+		return changed_chunks
+
+	# The batching decision is based on a fixed Chebyshev-distance near
+	# square. For a normal one- or two-chunk move, only the union of the old
+	# and new near squares can change state. This keeps boundary work bounded
+	# by roughly (2*BATCH_DISTANCE)^2 instead of all loaded chunks.
+	var min_x := mini(
+		old_center.x,
+		new_center_chunk.x
+	) - BATCH_DISTANCE
+	var max_x := maxi(
+		old_center.x,
+		new_center_chunk.x
+	) + BATCH_DISTANCE
+	var min_z := mini(
+		old_center.y,
+		new_center_chunk.y
+	) - BATCH_DISTANCE
+	var max_z := maxi(
+		old_center.y,
+		new_center_chunk.y
+	) + BATCH_DISTANCE
+
+	for x in range(min_x, max_x + 1):
+		for z in range(min_z, max_z + 1):
+			var chunk_coordinate := Vector2i(x, z)
+
+			if not present_chunks.has(chunk_coordinate):
+				continue
+
+			var was_batched := _is_chunk_batched_for_center(
+				chunk_coordinate,
+				old_center
+			)
+			var is_batched := _is_chunk_batched_for_center(
+				chunk_coordinate,
+				center_chunk
+			)
+
+			if was_batched == is_batched:
+				continue
+
+			changed_chunks.append(chunk_coordinate)
+
+			_mark_region_dirty(
+				_region_coordinate_for_chunk(chunk_coordinate)
+			)
 
 	return changed_chunks
 
