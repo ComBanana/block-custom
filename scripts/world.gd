@@ -2837,12 +2837,6 @@ func _update_chunks_incremental(
 		load_queue.push_front(chunk_coord)
 		load_queued[chunk_coord] = true
 
-		var stream_offset: Vector2i = chunk_coord - player_chunk
-		if stream_offset_indices.has(stream_offset):
-			# Existing stream_order state is no longer rebuilt on movement.
-			# The cached relative offset index is enough for tie-breaking.
-			pass
-
 	# Only these outgoing chunks need unloading. Do not scan all ~4,000 loaded
 	# chunks when the player crosses a single chunk boundary.
 	for chunk_coord in leaving:
