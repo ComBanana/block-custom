@@ -510,7 +510,7 @@ static func _add_solid_faces(
 			FACE_UP,
 			Vector3.UP,
 			1.0,
-			true,
+			include_collision,
 			top_rotation
 		)
 
@@ -525,7 +525,7 @@ static func _add_solid_faces(
 			FACE_DOWN,
 			Vector3.DOWN,
 			1.0,
-			true,
+			include_collision,
 			bottom_rotation
 		)
 
@@ -540,7 +540,7 @@ static func _add_solid_faces(
 			FACE_FORWARD,
 			Vector3.FORWARD,
 			1.0,
-			true,
+			include_collision,
 			side_rotation
 		)
 
@@ -555,7 +555,7 @@ static func _add_solid_faces(
 			FACE_BACK,
 			Vector3.BACK,
 			1.0,
-			true,
+			include_collision,
 			side_rotation
 		)
 
@@ -570,7 +570,7 @@ static func _add_solid_faces(
 			FACE_LEFT,
 			Vector3.LEFT,
 			1.0,
-			true,
+			include_collision,
 			side_rotation
 		)
 
@@ -585,7 +585,7 @@ static func _add_solid_faces(
 			FACE_RIGHT,
 			Vector3.RIGHT,
 			1.0,
-			true,
+			include_collision,
 			side_rotation
 		)
 
