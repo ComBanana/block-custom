@@ -127,6 +127,7 @@ class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
 	var data_revision: int = 0
+	var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 	var capture_ms: float = 0.0
 	var mesh_ms: float = 0.0
 	var center_blocks: PackedByteArray
@@ -3087,6 +3088,7 @@ func _capture_mesh_inputs(
 ) -> void:
 	var start_usec := Time.get_ticks_usec()
 	var chunk = loaded_chunks[chunk_coord]
+	result.mesh_max_y_exclusive = chunk.mesh_max_y_exclusive
 
 	# Duplicating the compact block arrays is cheap compared to walking
 	# the scene tree and doing thousands of cross-chunk lookups.
@@ -3131,7 +3133,8 @@ func _build_mesh_worker(
 		result.pos_x_blocks,
 		result.neg_z_blocks,
 		result.pos_z_blocks,
-		result.chunk_coordinate
+		result.chunk_coordinate,
+		result.mesh_max_y_exclusive
 	)
 	result.mesh_ms = float(
 		Time.get_ticks_usec() - start_usec
