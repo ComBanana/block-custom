@@ -74,6 +74,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export_category("Collision")
 @export var collision_distance: int = 3
 
+@export_category("Persistence")
+@export_range(1, 8, 1) var chunk_cache_saves_per_frame: int = 1
+
+
 @export_category("Water")
 @export var water_updates_per_tick: int = 2048
 @export_range(1, 20, 1) var water_tick_delay: int = DEFAULT_WATER_TICK_DELAY
@@ -158,8 +162,12 @@ var loaded_chunks: Dictionary = {}
 # ===================================================================
 
 var required_chunks: Dictionary = {}
-# Stable player-centered spiral order used for loading and rendering.
-var stream_order: Dictionary = {}
+# Cached spiral offsets are reused when the render distance does not change.
+# Normal chunk movement shifts the window incrementally instead of rebuilding
+# this entire list every time.
+var stream_offset_cache: Array[Vector2i] = []
+var stream_offset_indices: Dictionary = {}
+var stream_offset_cache_radius: int = -1
 
 # Lazy post-spawn mesh plan. Only a small working set is queued at once;
 # the remaining generated chunks are fed into the mesh pipeline gradually.
@@ -1150,6 +1158,9 @@ var dirty_chunks: Dictionary = {}
 # Newly generated chunks are cached separately from edit dirtiness so
 # periodic autosaves do not write the entire render distance at once.
 var generated_cache_pending: Dictionary = {}
+var pending_chunk_save_queue: Array[Vector2i] = []
+var pending_chunk_save_head: int = 0
+var pending_chunk_saves: Dictionary = {}
 var save_accumulator: float = 0.0
 const SAVE_INTERVAL: float = 15.0
 
@@ -1687,7 +1698,7 @@ func _process(delta: float) -> void:
 			player_chunk = current_chunk
 
 			var update_chunks_start_usec: int = Time.get_ticks_usec()
-			update_chunks()
+			update_chunks(previous_chunk)
 			var update_chunks_ms: float = (
 				float(Time.get_ticks_usec() - update_chunks_start_usec)
 				/ 1000.0
@@ -1789,6 +1800,13 @@ func _process(delta: float) -> void:
 	process_generation_queue()
 	PerformanceProfiler.record_phase(
 		"world/process_generation_queue",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
+	phase_start_usec = Time.get_ticks_usec()
+	process_pending_chunk_saves()
+	PerformanceProfiler.record_phase(
+		"world/process_pending_chunk_saves",
 		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
 	)
 
@@ -2162,11 +2180,14 @@ func _chunk_stream_score(chunk_coord: Vector2i) -> float:
 		var alignment := offset.normalized().dot(stream_direction)
 		score += alignment * (12.0 + minf(stream_speed * 2.5, 24.0))
 
-	# Keep the exact same-priority ring ordered by the player-centered
-	# spiral. The tiny tiebreaker is far smaller than the score difference
-	# between adjacent distance rings.
-	if stream_order.has(chunk_coord):
-		score -= float(stream_order[chunk_coord]) * 0.000001
+	# Keep the exact same-priority ring ordered by the cached
+	# player-centered spiral. The cache avoids rebuilding the 4,000+ entry
+	# order table on every chunk crossing.
+	var stream_offset: Vector2i = chunk_coord - player_chunk
+	if stream_offset_indices.has(stream_offset):
+		score -= float(
+			stream_offset_indices[stream_offset]
+		) * 0.000001
 
 	return score
 
@@ -2579,24 +2600,278 @@ func _build_spiral_offsets(radius: int) -> Array[Vector2i]:
 	return offsets
 
 
-func update_chunks() -> void:
-	required_chunks.clear()
-	stream_order.clear()
+func _get_stream_offsets(
+	radius: int
+) -> Array[Vector2i]:
+	if radius != stream_offset_cache_radius:
+		stream_offset_cache = _build_spiral_offsets(radius)
+		stream_offset_indices.clear()
 
-	# Build the active area in a true square spiral:
-	# player -> immediate neighbors -> progressively farther rings.
-	var spiral_offsets := _build_spiral_offsets(render_distance)
+		for index in range(stream_offset_cache.size()):
+			stream_offset_indices[
+				stream_offset_cache[index]
+			] = index
+
+		stream_offset_cache_radius = radius
+
+	return stream_offset_cache
+
+
+func _chunk_is_in_stream_square(
+	chunk_coord: Vector2i,
+	center_chunk: Vector2i,
+	radius: int
+) -> bool:
+	return (
+		chunk_coord.x >= center_chunk.x - radius
+		and chunk_coord.x <= center_chunk.x + radius
+		and chunk_coord.y >= center_chunk.y - radius
+		and chunk_coord.y <= center_chunk.y + radius
+	)
+
+
+func _append_unique_chunk(
+	chunks: Array[Vector2i],
+	seen: Dictionary,
+	chunk_coord: Vector2i
+) -> void:
+	if seen.has(chunk_coord):
+		return
+
+	seen[chunk_coord] = true
+	chunks.append(chunk_coord)
+
+
+func _prune_chunk_queue(
+	queue: Array[Vector2i],
+	queued: Dictionary,
+	removed: Dictionary
+) -> Array[Vector2i]:
+	if removed.is_empty():
+		return queue
+
+	var filtered: Array[Vector2i] = []
+
+	for chunk_coord in queue:
+		if removed.has(chunk_coord):
+			queued.erase(chunk_coord)
+		else:
+			filtered.append(chunk_coord)
+
+	return filtered
+
+
+func _update_chunks_incremental(
+	previous_chunk: Vector2i
+) -> void:
+	var delta_x: int = player_chunk.x - previous_chunk.x
+	var delta_z: int = player_chunk.y - previous_chunk.y
+
+	# A normal gameplay move is one chunk at a time. Large jumps use the full
+	# rebuild below because their changed area is no longer a small strip.
+	if abs(delta_x) > 1 or abs(delta_z) > 1:
+		_update_chunks_full()
+		return
+
+	var radius: int = maxi(0, render_distance)
+	var entering: Array[Vector2i] = []
+	var leaving: Array[Vector2i] = []
+	var entering_seen: Dictionary = {}
+	var leaving_seen: Dictionary = {}
+
+	if delta_x > 0:
+		var entering_x: int = player_chunk.x + radius
+		var leaving_x: int = previous_chunk.x - radius
+
+		for offset in range(-radius, radius + 1):
+			_append_unique_chunk(
+				entering,
+				entering_seen,
+				Vector2i(
+					entering_x,
+					player_chunk.y + offset
+				)
+			)
+			_append_unique_chunk(
+				leaving,
+				leaving_seen,
+				Vector2i(
+					leaving_x,
+					previous_chunk.y + offset
+				)
+			)
+	elif delta_x < 0:
+		var entering_x: int = player_chunk.x - radius
+		var leaving_x: int = previous_chunk.x + radius
+
+		for offset in range(-radius, radius + 1):
+			_append_unique_chunk(
+				entering,
+				entering_seen,
+				Vector2i(
+					entering_x,
+					player_chunk.y + offset
+				)
+			)
+			_append_unique_chunk(
+				leaving,
+				leaving_seen,
+				Vector2i(
+					leaving_x,
+					previous_chunk.y + offset
+				)
+			)
+
+	if delta_z > 0:
+		var entering_z: int = player_chunk.y + radius
+		var leaving_z: int = previous_chunk.y - radius
+
+		for offset in range(-radius, radius + 1):
+			_append_unique_chunk(
+				entering,
+				entering_seen,
+				Vector2i(
+					player_chunk.x + offset,
+					entering_z
+				)
+			)
+			_append_unique_chunk(
+				leaving,
+				leaving_seen,
+				Vector2i(
+					previous_chunk.x + offset,
+					leaving_z
+				)
+			)
+	elif delta_z < 0:
+		var entering_z: int = player_chunk.y - radius
+		var leaving_z: int = previous_chunk.y + radius
+
+		for offset in range(-radius, radius + 1):
+			_append_unique_chunk(
+				entering,
+				entering_seen,
+				Vector2i(
+					player_chunk.x + offset,
+					entering_z
+				)
+			)
+			_append_unique_chunk(
+				leaving,
+				leaving_seen,
+				Vector2i(
+					previous_chunk.x + offset,
+					leaving_z
+				)
+			)
+
+	# Keep the same cached spiral for the gradual mesh streamer. Reset only
+	# the cursor, not the array allocation.
+	mesh_stream_offsets = _get_stream_offsets(radius)
+	mesh_stream_cursor = 0
+
+	for chunk_coord in leaving:
+		required_chunks.erase(chunk_coord)
+
+	for chunk_coord in entering:
+		required_chunks[chunk_coord] = true
+
+	load_queue = _prune_chunk_queue(
+		load_queue,
+		load_queued,
+		leaving_seen
+	)
+	critical_generation_queue = _prune_chunk_queue(
+		critical_generation_queue,
+		critical_generation_queued,
+		leaving_seen
+	)
+	generation_queue = _prune_chunk_queue(
+		generation_queue,
+		generation_queued,
+		leaving_seen
+	)
+	player_edit_queue = _prune_chunk_queue(
+		player_edit_queue,
+		player_edit_queued,
+		leaving_seen
+	)
+	critical_mesh_queue = _prune_chunk_queue(
+		critical_mesh_queue,
+		critical_mesh_queued,
+		leaving_seen
+	)
+	near_mesh_queue = _prune_chunk_queue(
+		near_mesh_queue,
+		near_mesh_queued,
+		leaving_seen
+	)
+	far_mesh_queue = _prune_chunk_queue(
+		far_mesh_queue,
+		far_mesh_queued,
+		leaving_seen
+	)
+	water_mesh_queue = _prune_chunk_queue(
+		water_mesh_queue,
+		water_mesh_queued,
+		leaving_seen
+	)
+	collision_queue = _prune_chunk_queue(
+		collision_queue,
+		collision_queued,
+		leaving_seen
+	)
+
+	# New chunks get priority in the load queue. Existing queued work remains
+	# intact so crossing a boundary no longer discards and reconstructs the
+	# entire streaming working set.
+	for index in range(entering.size() - 1, -1, -1):
+		var chunk_coord: Vector2i = entering[index]
+
+		if not _is_chunk_needed(chunk_coord):
+			continue
+
+		if loaded_chunks.has(chunk_coord):
+			continue
+
+		load_queue.push_front(chunk_coord)
+		load_queued[chunk_coord] = true
+
+		var stream_offset: Vector2i = chunk_coord - player_chunk
+		if stream_offset_indices.has(stream_offset):
+			# Existing stream_order state is no longer rebuilt on movement.
+			# The cached relative offset index is enough for tie-breaking.
+			pass
+
+	# Only these outgoing chunks need unloading. Do not scan all ~4,000 loaded
+	# chunks when the player crosses a single chunk boundary.
+	for chunk_coord in leaving:
+		if (
+			loaded_chunks.has(chunk_coord)
+			and not required_chunks.has(chunk_coord)
+			and not teleport_required_chunks.has(chunk_coord)
+		):
+			unload_chunk(chunk_coord)
+
+
+func _update_chunks_full() -> void:
+	required_chunks.clear()
+
+	var spiral_offsets := _get_stream_offsets(render_distance)
 	mesh_stream_offsets = spiral_offsets
 	mesh_stream_cursor = 0
 
 	if player_spawned:
-		# Pending background work from the old player position is no longer
-		# useful. Keep active worker jobs running, but rebuild the queued
-		# working set around the new player position.
+		# Large jumps/teleports are rare. Rebuild the queued working set around
+		# the new center only for those cases.
 		near_mesh_queue.clear()
 		near_mesh_queued.clear()
 		far_mesh_queue.clear()
 		far_mesh_queued.clear()
+		critical_mesh_queue.clear()
+		critical_mesh_queued.clear()
+		water_mesh_queue.clear()
+		water_mesh_queued.clear()
 		_queue_startup_mesh_area()
 
 	for index in range(spiral_offsets.size()):
@@ -2604,9 +2879,8 @@ func update_chunks() -> void:
 			player_chunk + spiral_offsets[index]
 		)
 		required_chunks[chunk_coord] = true
-		stream_order[chunk_coord] = index
 
-	# Rebuild the load queue in the exact same order.
+	# Rebuild the load queue only for startup or large movements.
 	load_queue.clear()
 	load_queued.clear()
 
@@ -2624,7 +2898,6 @@ func update_chunks() -> void:
 
 	_queue_pending_teleport_chunks()
 
-	# Unload chunks outside render distance.
 	var chunks_to_remove: Array[Vector2i] = []
 
 	for chunk_coord in loaded_chunks:
@@ -2636,6 +2909,20 @@ func update_chunks() -> void:
 
 	for chunk_coord in chunks_to_remove:
 		unload_chunk(chunk_coord)
+
+
+func update_chunks(
+	previous_chunk: Vector2i = INVALID_CHUNK
+) -> void:
+	if (
+		player_spawned
+		and previous_chunk != INVALID_CHUNK
+	):
+		_update_chunks_incremental(previous_chunk)
+		return
+
+	_update_chunks_full()
+
 
 
 # ===================================================================
@@ -2720,6 +3007,8 @@ func _migrate_saved_chunk_data(
 func load_chunk(
 	chunk_coord: Vector2i
 ) -> void:
+
+	pending_chunk_saves.erase(chunk_coord)
 
 	var chunk = chunk_scene.instantiate()
 	chunk.set_generation_stage(
@@ -3881,6 +4170,89 @@ func process_collision_queue() -> void:
 		collisions_done += 1
 
 
+func _queue_chunk_save(
+	chunk_coord: Vector2i,
+	blocks: PackedByteArray
+) -> void:
+	var snapshot: PackedByteArray = blocks.duplicate()
+	if pending_chunk_saves.has(chunk_coord):
+		pending_chunk_saves[chunk_coord] = snapshot
+		return
+
+	pending_chunk_saves[chunk_coord] = snapshot
+	pending_chunk_save_queue.append(chunk_coord)
+
+
+func process_pending_chunk_saves() -> void:
+	var save_limit: int = maxi(
+		1,
+		chunk_cache_saves_per_frame
+	)
+	var saved_count: int = 0
+
+	while (
+		saved_count < save_limit
+		and pending_chunk_save_head < pending_chunk_save_queue.size()
+	):
+		var chunk_coord: Vector2i = pending_chunk_save_queue[
+			pending_chunk_save_head
+		]
+		pending_chunk_save_head += 1
+
+		if not pending_chunk_saves.has(chunk_coord):
+			continue
+
+		var blocks: PackedByteArray = pending_chunk_saves[chunk_coord]
+
+		var save_start_usec: int = Time.get_ticks_usec()
+		WorldStore.save_chunk(
+			world_name,
+			chunk_coord,
+			blocks
+		)
+		PerformanceProfiler.record_phase(
+			"persistence/chunk_cache_save",
+			float(
+				Time.get_ticks_usec() - save_start_usec
+			) / 1000.0
+		)
+
+		pending_chunk_saves.erase(chunk_coord)
+		generated_cache_pending.erase(chunk_coord)
+		saved_count += 1
+
+	if (
+		pending_chunk_save_head >= 1024
+		and pending_chunk_save_head * 2 >= pending_chunk_save_queue.size()
+	):
+		pending_chunk_save_queue = pending_chunk_save_queue.slice(
+			pending_chunk_save_head
+		)
+		pending_chunk_save_head = 0
+
+
+func _flush_pending_chunk_saves() -> void:
+	while pending_chunk_save_head < pending_chunk_save_queue.size():
+		var chunk_coord: Vector2i = pending_chunk_save_queue[
+			pending_chunk_save_head
+		]
+		pending_chunk_save_head += 1
+
+		if not pending_chunk_saves.has(chunk_coord):
+			continue
+
+		WorldStore.save_chunk(
+			world_name,
+			chunk_coord,
+			pending_chunk_saves[chunk_coord]
+		)
+		pending_chunk_saves.erase(chunk_coord)
+		generated_cache_pending.erase(chunk_coord)
+
+	pending_chunk_save_queue.clear()
+	pending_chunk_save_head = 0
+
+
 # ===================================================================
 # Unloading
 # ===================================================================
@@ -3903,8 +4275,7 @@ func unload_chunk(
 		or dirty_chunks.has(chunk_coord)
 	):
 		if chunk.is_generated:
-			WorldStore.save_chunk(
-				world_name,
+			_queue_chunk_save(
 				chunk_coord,
 				chunk.blocks
 			)
@@ -4169,6 +4540,8 @@ func save_world() -> void:
 
 		if not chunk.is_generated:
 			continue
+
+		pending_chunk_saves.erase(chunk_coord)
 
 		WorldStore.save_chunk(
 			world_name,
@@ -4495,6 +4868,8 @@ func _save_all_loaded_generated_chunks() -> void:
 		if not chunk.is_generated:
 			continue
 
+		pending_chunk_saves.erase(chunk_coord)
+
 		WorldStore.save_chunk(
 			world_name,
 			chunk_coord,
@@ -4512,6 +4887,7 @@ func _exit_tree() -> void:
 
 	save_world()
 	_save_all_loaded_generated_chunks()
+	_flush_pending_chunk_saves()
 
 	if render_regions != null:
 		render_regions.shutdown()
