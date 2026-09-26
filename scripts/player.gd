@@ -699,6 +699,14 @@ func get_swim_direction(input_vector: Vector2) -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
+	# Never simulate movement inside a chunk whose terrain collision is not ready.
+	# This is a final safety net for chunk remesh/unload races while streaming.
+	if controls_enabled:
+		var physics_chunk: Vector2i = world.world_to_chunk(global_position)
+		if not world.can_player_enter_chunk(physics_chunk):
+			velocity = Vector3.ZERO
+			return
+
 	if chat_active:
 		block_action_timer = 0.0
 
@@ -864,7 +872,11 @@ func _physics_process(delta: float) -> void:
 				predicted_chunk
 			)
 		):
+			# Do not let inertia or gravity carry the player into an unready chunk.
+			# Stop the horizontal component immediately and wait for its collision.
 			direction = Vector3.ZERO
+			velocity.x = 0.0
+			velocity.z = 0.0
 
 
 	# ---------------------------------------------------------------
