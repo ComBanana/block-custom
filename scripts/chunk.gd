@@ -620,6 +620,17 @@ func _add_mesh_surface(
 	)
 
 
+func clear_visual_meshes() -> void:
+	$ChunkMesh.mesh = null
+	$WaterMesh.mesh = null
+	collision_faces = PackedVector3Array()
+	mesh_ready = false
+	collision_ready = false
+
+	if is_generated:
+		set_generation_stage(GenerationStage.TERRAIN_READY)
+
+
 func clear_collision() -> void:
 	$ChunkCollision/CollisionShape.shape = null
 	collision_ready = false
