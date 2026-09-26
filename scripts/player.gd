@@ -583,38 +583,33 @@ func is_in_water() -> bool:
 		else STANDING_HEIGHT
 	)
 
-	# Sample several points up the player's body rather than selecting
-	# one voxel from the feet. The lowest sample is 0.125 blocks above
-	# the feet, which is safely above a water surface that is exactly
-	# one pixel (1/16 block) below the top of a supporting block.
-	# Higher samples keep swimming active while the player rises
-	# through the water.
+	# Water variants occupy different vertical amounts. Test the actual
+	# fluid surface so shallow Flow 1..7 states do not act like full blocks.
 	var sample_heights := [
-		0.125,
+		0.05,
 		height * 0.25,
 		height * 0.5,
 		minf(height * 0.75, height - 0.05)
 	]
 
 	for sample_height in sample_heights:
-		if _is_water_block(
-			world.get_block_world(
-				global_position + Vector3(
-					0.0,
-					sample_height,
-					0.0
-				)
-			)
-		):
+		var sample_position: Vector3 = (
+			global_position + Vector3(0.0, sample_height, 0.0)
+		)
+		var surface_y: float = world.get_water_surface_y_at_world(
+			sample_position
+		)
+
+		if is_finite(surface_y) and sample_position.y < surface_y:
 			return true
 
 	return false
 
 
 func is_head_in_water() -> bool:
-	return _is_water_block(
-		world.get_block_world(camera.global_position)
-	)
+	var head_position: Vector3 = camera.global_position
+	var surface_y: float = world.get_water_surface_y_at_world(head_position)
+	return is_finite(surface_y) and head_position.y < surface_y
 
 
 func _water_below_feet() -> bool:
@@ -630,15 +625,41 @@ func _solid_below_feet() -> bool:
 
 
 func _submerged_depth() -> float:
-	var depth := 0.0
-	var height: float = collision_shape.shape.size.y if collision_shape.shape is BoxShape3D else STANDING_HEIGHT
-	var step := 0.1
-	var y := 0.05
-	while y < height:
-		if _is_water_block(world.get_block_world(global_position + Vector3(0.0, y, 0.0))):
-			depth += step
-		y += step
-	return depth
+	var height: float = (
+		collision_shape.shape.size.y
+		if collision_shape.shape is BoxShape3D
+		else STANDING_HEIGHT
+	)
+
+	var sample_heights := [
+		0.05,
+		height * 0.25,
+		height * 0.5,
+		minf(height * 0.75, height - 0.05)
+	]
+	var highest_surface_y: float = -INF
+
+	for sample_height in sample_heights:
+		var sample_position: Vector3 = (
+			global_position + Vector3(0.0, sample_height, 0.0)
+		)
+		var surface_y: float = world.get_water_surface_y_at_world(
+			sample_position
+		)
+		if is_finite(surface_y):
+			highest_surface_y = maxf(
+				highest_surface_y,
+			surface_y
+			)
+
+	if not is_finite(highest_surface_y):
+		return 0.0
+
+	return clampf(
+		highest_surface_y - global_position.y,
+		0.0,
+		height
+	)
 
 
 func _is_shallow_water_for_ground_jump() -> bool:
@@ -897,10 +918,23 @@ func _physics_process(delta: float) -> void:
 		else:
 			input_velocity = Vector3(move_direction.x, 0.0, move_direction.z) * acceleration * water_drag
 
+		# Reduce vertical fluid thrust in shallow flowing water. This prevents
+		# Flow 6/7 from behaving like a full source block when Space is held.
+		var immersion_ratio: float = clampf(
+			_submerged_depth() / maxf(
+				collision_shape.shape.size.y
+				if collision_shape.shape is BoxShape3D
+				else STANDING_HEIGHT,
+				0.001
+			),
+			0.0,
+			1.0
+		)
+
 		if is_crouching:
-			input_velocity.y = -water_sneak_impulse_per_tick * 20.0 * vertical_drag
+			input_velocity.y = -water_sneak_impulse_per_tick * 20.0 * vertical_drag * immersion_ratio
 		elif not chat_active and Input.is_action_pressed("jump"):
-			input_velocity.y += water_jump_impulse_per_tick * 20.0 * vertical_drag
+			input_velocity.y += water_jump_impulse_per_tick * 20.0 * vertical_drag * immersion_ratio
 		elif swimming:
 			input_velocity.y = move_direction.y * acceleration * vertical_drag
 
