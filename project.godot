@@ -11,13 +11,14 @@ config_version=5
 [application]
 
 config/name="BlockCraft"
-config/version="0.18.1"
+config/version="0.19.0"
 run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
 
+PerformanceProfiler="*res://scripts/performance_profiler.gd"
 GameSettings="*res://scripts/game_settings.gd"
 GameSession="*res://scripts/game_session.gd"
 
