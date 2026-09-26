@@ -1134,6 +1134,9 @@ var world_name: String = "World"
 var world_seed: int = 12345
 var world_metadata: Dictionary = {}
 var dirty_chunks: Dictionary = {}
+# Newly generated chunks are cached separately from edit dirtiness so
+# periodic autosaves do not write the entire render distance at once.
+var generated_cache_pending: Dictionary = {}
 var save_accumulator: float = 0.0
 const SAVE_INTERVAL: float = 15.0
 
@@ -2656,10 +2659,10 @@ func process_generation_queue() -> void:
 			generated_data
 		)
 
-		# Generated chunks are part of the persistent world cache. They
-		# will be written on unload, periodic save, or world exit instead
-		# of being regenerated on the next launch.
-		dirty_chunks[chunk_coord] = true
+		# Generated chunks become part of the persistent world cache.
+		# Keep this separate from edit dirtiness so periodic autosaves do
+		# not repeatedly write the whole render-distance area.
+		generated_cache_pending[chunk_coord] = true
 
 		# Kick the water simulation from exposed source cells only.
 		# Interior ocean water needs no update until an exposed frontier
@@ -3553,12 +3556,17 @@ func unload_chunk(
 		chunk_coord
 	]
 
-	if dirty_chunks.has(chunk_coord) and chunk.is_generated:
-		WorldStore.save_chunk(
-			world_name,
-			chunk_coord,
-			chunk.blocks
-		)
+	if (
+		(chunk.is_generated and generated_cache_pending.has(chunk_coord))
+		or dirty_chunks.has(chunk_coord)
+	):
+		if chunk.is_generated:
+			WorldStore.save_chunk(
+				world_name,
+				chunk_coord,
+				chunk.blocks
+			)
+		generated_cache_pending.erase(chunk_coord)
 		dirty_chunks.erase(chunk_coord)
 
 	loaded_chunks.erase(
@@ -3819,6 +3827,8 @@ func save_world() -> void:
 			chunk_coord,
 			chunk.blocks
 		)
+		generated_cache_pending.erase(chunk_coord)
+		dirty_chunks.erase(chunk_coord)
 
 	dirty_chunks.clear()
 
