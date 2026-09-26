@@ -101,12 +101,9 @@ const DIRT_TEXTURE := preload("res://textures/dirt.png")
 const STONE_TEXTURE := preload("res://textures/stone.png")
 const SAND_TEXTURE := preload("res://textures/sand.png")
 const WATER_TEXTURE := preload("res://textures/water.png")
+const SOLID_CHUNK_SHADER := preload("res://shaders/chunk_solid.gdshader")
 
-var grass_side_material: StandardMaterial3D
-var grass_top_material: StandardMaterial3D
-var dirt_material: StandardMaterial3D
-var stone_material: StandardMaterial3D
-var sand_material: StandardMaterial3D
+var solid_material: ShaderMaterial
 var water_material: StandardMaterial3D
 
 var moon_light: DirectionalLight3D
@@ -1582,25 +1579,28 @@ func _smoothstep(value: float) -> float:
 
 
 func _create_shared_materials() -> void:
-	grass_side_material = StandardMaterial3D.new()
-	grass_side_material.albedo_texture = GRASS_SIDE_TEXTURE
-	grass_side_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	grass_top_material = StandardMaterial3D.new()
-	grass_top_material.albedo_texture = GRASS_TOP_TEXTURE
-	grass_top_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	dirt_material = StandardMaterial3D.new()
-	dirt_material.albedo_texture = DIRT_TEXTURE
-	dirt_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	stone_material = StandardMaterial3D.new()
-	stone_material.albedo_texture = STONE_TEXTURE
-	stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	sand_material = StandardMaterial3D.new()
-	sand_material.albedo_texture = SAND_TEXTURE
-	sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	solid_material = ShaderMaterial.new()
+	solid_material.shader = SOLID_CHUNK_SHADER
+	solid_material.set_shader_parameter(
+		"grass_top_texture",
+		GRASS_TOP_TEXTURE
+	)
+	solid_material.set_shader_parameter(
+		"grass_side_texture",
+		GRASS_SIDE_TEXTURE
+	)
+	solid_material.set_shader_parameter(
+		"dirt_texture",
+		DIRT_TEXTURE
+	)
+	solid_material.set_shader_parameter(
+		"stone_texture",
+		STONE_TEXTURE
+	)
+	solid_material.set_shader_parameter(
+		"sand_texture",
+		SAND_TEXTURE
+	)
 
 	water_material = StandardMaterial3D.new()
 	water_material.albedo_texture = WATER_TEXTURE
@@ -2490,13 +2490,10 @@ func load_chunk(
 	chunk.mountain_region_noise = mountain_region_noise
 	chunk.mountain_shape_noise = mountain_shape_noise
 
-	# Share the same materials across every chunk. This avoids
-	# creating five new StandardMaterial3D resources per chunk.
-	chunk.grass_side_material = grass_side_material
-	chunk.grass_top_material = grass_top_material
-	chunk.dirt_material = dirt_material
-	chunk.stone_material = stone_material
-	chunk.sand_material = sand_material
+	# Share one opaque shader material and one translucent water material
+	# across every chunk. Opaque block textures are selected in-shader,
+	# so a chunk needs only one opaque draw surface.
+	chunk.solid_material = solid_material
 	chunk.water_material = water_material
 
 	loaded_chunks[chunk_coord] = chunk
