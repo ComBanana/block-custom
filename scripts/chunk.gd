@@ -72,6 +72,9 @@ var mesh_job_id: int = 0
 # they captured so stale asynchronous results can never overwrite newer data.
 var mesh_data_revision: int = 0
 var collision_faces := PackedVector3Array()
+# Highest non-air Y + 1. Most terrain occupies only the lower world height,
+# so the mesher can skip the empty upper part of the 256-block chunk.
+var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 
 
 func set_generation_stage(stage: GenerationStage) -> void:
@@ -80,6 +83,23 @@ func set_generation_stage(stage: GenerationStage) -> void:
 
 func is_generation_stage_at_least(stage: GenerationStage) -> bool:
 	return generation_stage >= stage
+
+
+func _recalculate_mesh_max_y() -> void:
+	mesh_max_y_exclusive = 1
+
+	for y in range(CHUNK_HEIGHT - 1, -1, -1):
+		var layer_base: int = y * CHUNK_SIZE * CHUNK_SIZE
+		var found_non_air: bool = false
+
+		for index in range(layer_base, layer_base + CHUNK_SIZE * CHUNK_SIZE):
+			if blocks[index] != AIR:
+				found_non_air = true
+				break
+
+		if found_non_air:
+			mesh_max_y_exclusive = y + 1
+			return
 
 
 func _ready() -> void:
@@ -134,6 +154,14 @@ func set_block(x: int, y: int, z: int, block_id: int) -> void:
 
 	blocks[_get_index(x, y, z)] = block_id
 
+	if block_id != AIR:
+		mesh_max_y_exclusive = maxi(
+			mesh_max_y_exclusive,
+			y + 1
+		)
+	elif y + 1 >= mesh_max_y_exclusive:
+		_recalculate_mesh_max_y()
+
 
 func get_block(x: int, y: int, z: int) -> int:
 	if x < 0 or x >= CHUNK_SIZE:
@@ -158,6 +186,7 @@ func begin_terrain_generation() -> void:
 	)
 
 	blocks.fill(AIR)
+	mesh_max_y_exclusive = 1
 
 	terrain_x = 0
 	terrain_generating = true
@@ -513,6 +542,7 @@ func apply_generated_data(
 ) -> void:
 
 	blocks = generated_blocks
+	_recalculate_mesh_max_y()
 	mesh_data_revision += 1
 	set_generation_stage(GenerationStage.TERRAIN_READY)
 
