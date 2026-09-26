@@ -2940,7 +2940,12 @@ func enqueue_mesh_chunk(
 	if not chunk.is_generated:
 		return
 
-	if render_regions != null and render_regions.is_chunk_batched(chunk_coord):
+	# Teleport preparation requires individual meshes so the destination
+	# collision can be built before the player is moved there.
+	if _is_chunk_teleport_required(chunk_coord):
+		# Continue through the normal individual mesh path.
+		pass
+	elif render_regions != null and render_regions.is_chunk_batched(chunk_coord):
 		render_regions.mark_chunk_dirty(chunk_coord)
 		return
 
@@ -3139,7 +3144,9 @@ func enqueue_water_mesh_chunk(
 	if not chunk.is_generated:
 		return
 
-	if render_regions != null and render_regions.is_chunk_batched(chunk_coord):
+	if _is_chunk_teleport_required(chunk_coord):
+		pass
+	elif render_regions != null and render_regions.is_chunk_batched(chunk_coord):
 		render_regions.mark_chunk_dirty(chunk_coord)
 		return
 
