@@ -133,9 +133,9 @@ func update_center(
 	center_chunk = new_center_chunk
 
 	var changed_chunks: Array[Vector2i] = []
-	var delta_x := abs(new_center_chunk.x - old_center.x)
-	var delta_z := abs(new_center_chunk.y - old_center.y)
-	var full_scan_threshold := BATCH_DISTANCE * 2 + 2
+	var delta_x: int = abs(new_center_chunk.x - old_center.x)
+	var delta_z: int = abs(new_center_chunk.y - old_center.y)
+	var full_scan_threshold: int = BATCH_DISTANCE * 2 + 2
 
 	if (
 		delta_x > full_scan_threshold
@@ -646,8 +646,7 @@ func _build_region_worker(
 				neg_z_blocks,
 				pos_z_blocks,
 				chunk_coordinate,
-				max_y_exclusive,
-				false
+				max_y_exclusive
 			)
 
 			var chunk_offset := Vector3(
