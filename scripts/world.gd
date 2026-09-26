@@ -152,6 +152,8 @@ var loaded_chunks: Dictionary = {}
 # ===================================================================
 
 var required_chunks: Dictionary = {}
+# Stable player-centered spiral order used for loading and rendering.
+var stream_order: Dictionary = {}
 
 # Temporary high-priority area kept loaded while a teleport is being prepared.
 var teleport_required_chunks: Dictionary = {}
@@ -1920,6 +1922,12 @@ func _chunk_stream_score(chunk_coord: Vector2i) -> float:
 		var alignment := offset.normalized().dot(stream_direction)
 		score += alignment * (12.0 + minf(stream_speed * 2.5, 24.0))
 
+	# Keep the exact same-priority ring ordered by the player-centered
+	# spiral. The tiny tiebreaker is far smaller than the score difference
+	# between adjacent distance rings.
+	if stream_order.has(chunk_coord):
+		score -= float(stream_order[chunk_coord]) * 0.000001
+
 	return score
 
 
@@ -1932,9 +1940,15 @@ func _take_best_generation_candidate(
 	var scan_limit: int = scheduler_scan_limit
 
 	if not player_spawned:
+		# Startup rendering must see the entire queue so a large render
+		# distance cannot make the far-left edge win simply because it was
+		# inserted into the queue first.
 		scan_limit = maxi(
 			scan_limit,
-			loading_scheduler_scan_limit
+			maxi(
+				loading_scheduler_scan_limit,
+				required_chunks.size()
+			)
 		)
 
 	var scan_count := mini(queue.size(), scan_limit)
@@ -2276,70 +2290,80 @@ func _format_teleport_coordinate(value: float) -> String:
 	return "%.3f" % value
 
 
+func _build_spiral_offsets(radius: int) -> Array[Vector2i]:
+	var offsets: Array[Vector2i] = []
+	var required_count: int = (radius * 2 + 1) * (radius * 2 + 1)
+	if required_count <= 0:
+		return offsets
+
+	var x: int = 0
+	var z: int = 0
+	var step_length: int = 1
+	var direction_index: int = 0
+	var directions: Array[Vector2i] = [
+		Vector2i(1, 0),
+		Vector2i(0, 1),
+		Vector2i(-1, 0),
+		Vector2i(0, -1)
+	]
+
+	offsets.append(Vector2i.ZERO)
+
+	while offsets.size() < required_count:
+		for repetition in range(2):
+			var direction: Vector2i = directions[direction_index]
+			for step in range(step_length):
+				x += direction.x
+				z += direction.y
+
+				if (
+					abs(x) <= radius
+					and abs(z) <= radius
+				):
+					offsets.append(Vector2i(x, z))
+
+				if offsets.size() >= required_count:
+					return offsets
+
+			direction_index = (
+				direction_index + 1
+			) % directions.size()
+
+		step_length += 1
+
+	return offsets
+
+
 func update_chunks() -> void:
-
 	required_chunks.clear()
+	stream_order.clear()
 
-	for x in range(
-		player_chunk.x - render_distance,
-		player_chunk.x + render_distance + 1
-	):
+	# Build the active area in a true square spiral:
+	# player -> immediate neighbors -> progressively farther rings.
+	var spiral_offsets := _build_spiral_offsets(render_distance)
 
-		for z in range(
-			player_chunk.y - render_distance,
-			player_chunk.y + render_distance + 1
-		):
+	for index in range(spiral_offsets.size()):
+		var chunk_coord: Vector2i = (
+			player_chunk + spiral_offsets[index]
+		)
+		required_chunks[chunk_coord] = true
+		stream_order[chunk_coord] = index
 
-			var chunk_coord := Vector2i(x, z)
-
-			required_chunks[chunk_coord] = true
-
-
-	# Rebuild the load queue.
+	# Rebuild the load queue in the exact same order.
 	load_queue.clear()
 	load_queued.clear()
 
-	for radius in range(
-		render_distance + 1
-	):
+	for offset in spiral_offsets:
+		var chunk_coord := player_chunk + offset
 
-		for x_offset in range(
-			-radius,
-			radius + 1
-		):
+		if not _is_chunk_needed(chunk_coord):
+			continue
 
-			for z_offset in range(
-				-radius,
-				radius + 1
-			):
+		if loaded_chunks.has(chunk_coord):
+			continue
 
-				if max(
-					abs(x_offset),
-					abs(z_offset)
-				) != radius:
-					continue
-
-				var chunk_coord := Vector2i(
-					player_chunk.x + x_offset,
-					player_chunk.y + z_offset
-				)
-
-				if not _is_chunk_needed(
-					chunk_coord
-				):
-					continue
-
-				if loaded_chunks.has(
-					chunk_coord
-				):
-					continue
-
-				load_queue.append(
-					chunk_coord
-				)
-
-				load_queued[chunk_coord] = true
-
+		load_queue.append(chunk_coord)
+		load_queued[chunk_coord] = true
 
 	_queue_pending_teleport_chunks()
 
@@ -2347,16 +2371,11 @@ func update_chunks() -> void:
 	var chunks_to_remove: Array[Vector2i] = []
 
 	for chunk_coord in loaded_chunks:
-
 		if (
 			not required_chunks.has(chunk_coord)
 			and not teleport_required_chunks.has(chunk_coord)
 		):
-
-			chunks_to_remove.append(
-				chunk_coord
-			)
-
+			chunks_to_remove.append(chunk_coord)
 
 	for chunk_coord in chunks_to_remove:
 		unload_chunk(chunk_coord)
@@ -2631,6 +2650,11 @@ func process_generation_queue() -> void:
 		chunk.apply_generated_data(
 			generated_data
 		)
+
+		# Generated chunks are part of the persistent world cache. They
+		# will be written on unload, periodic save, or world exit instead
+		# of being regenerated on the next launch.
+		dirty_chunks[chunk_coord] = true
 
 		# Kick the water simulation from exposed source cells only.
 		# Interior ocean water needs no update until an exposed frontier
@@ -3977,9 +4001,28 @@ func try_start_gameplay() -> void:
 	print(generation_profiler.get_summary())
 
 
+func _save_all_loaded_generated_chunks() -> void:
+	# Persist the generated world cache even when the player never edited
+	# anything. This is intentionally aggressive: subsequent launches can
+	# load voxel data directly instead of regenerating terrain.
+	for chunk_coord in loaded_chunks:
+		var chunk = loaded_chunks[chunk_coord]
+		if not chunk.is_generated:
+			continue
+
+		WorldStore.save_chunk(
+			world_name,
+			chunk_coord,
+			chunk.blocks
+		)
+
+	dirty_chunks.clear()
+
+
 func _exit_tree() -> void:
 
 	save_world()
+	_save_all_loaded_generated_chunks()
 
 	for task_id in generation_tasks:
 		var wait_error: Error = (
