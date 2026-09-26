@@ -52,15 +52,6 @@ func _ready() -> void:
 			"application/config/version",
 			"0.2.1"
 		)
-	video_button.pressed.connect(_on_video_tab_pressed)
-	controls_button.pressed.connect(_on_controls_tab_pressed)
-	toggle_sprint_button.pressed.connect(_on_toggle_sprint_pressed)
-	toggle_crouch_button.pressed.connect(_on_toggle_crouch_pressed)
-	fog_button.pressed.connect(_on_fog_pressed)
-	view_bobbing_button.pressed.connect(_on_view_bobbing_pressed)
-	light_shaders_button.pressed.connect(_on_light_shaders_pressed)
-	keybinds_button.pressed.connect(_on_keybinds_pressed)
-	username_save_button.pressed.connect(_on_username_save_pressed)
 	get_tree().paused = false
 	_show_panel(main_panel)
 
