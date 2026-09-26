@@ -1990,9 +1990,14 @@ func _take_best_mesh_candidate(
 	var scan_limit: int = scheduler_scan_limit
 
 	if not player_spawned:
+		# Startup rendering must consider the whole render-distance queue.
+		# Otherwise a large far queue can still select its first x-column.
 		scan_limit = maxi(
 			scan_limit,
-			loading_scheduler_scan_limit
+			maxi(
+				loading_scheduler_scan_limit,
+				required_chunks.size()
+			)
 		)
 
 	var scan_count := mini(queue.size(), scan_limit)
