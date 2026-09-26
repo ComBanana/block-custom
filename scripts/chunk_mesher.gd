@@ -201,7 +201,8 @@ static func build_from_blocks(
 	neg_z_blocks: PackedByteArray,
 	pos_z_blocks: PackedByteArray,
 	chunk_coordinate: Vector2i = Vector2i.ZERO,
-	max_y_exclusive: int = CHUNK_HEIGHT
+	max_y_exclusive: int = CHUNK_HEIGHT,
+	include_collision: bool = true
 ) -> MeshBuffer:
 	max_y_exclusive = clampi(
 		max_y_exclusive,
@@ -250,7 +251,12 @@ static func build_from_blocks(
 		max_y_exclusive
 	)
 
-	return build(snapshot, chunk_coordinate, max_y_exclusive)
+	return build(
+		snapshot,
+		chunk_coordinate,
+		max_y_exclusive,
+		include_collision
+	)
 
 
 static func _copy_center_blocks(
@@ -348,7 +354,8 @@ static func _copy_z_border(
 static func build(
 	snapshot: PackedByteArray,
 	chunk_coordinate: Vector2i = Vector2i.ZERO,
-	max_y_exclusive: int = CHUNK_HEIGHT
+	max_y_exclusive: int = CHUNK_HEIGHT,
+	include_collision: bool = true
 ) -> MeshBuffer:
 	var buffer := MeshBuffer.new()
 
@@ -385,7 +392,8 @@ static func build(
 						z,
 						block_id,
 						buffer,
-						chunk_coordinate
+						chunk_coordinate,
+						include_collision
 					)
 
 	return buffer
@@ -465,7 +473,8 @@ static func _add_solid_faces(
 	z: int,
 	block_id: int,
 	buffer: MeshBuffer,
-	chunk_coordinate: Vector2i
+	chunk_coordinate: Vector2i,
+	include_collision: bool = true
 ) -> void:
 	var origin := Vector3(x, y, z)
 	var random_rotation: int = _texture_rotation_steps(
