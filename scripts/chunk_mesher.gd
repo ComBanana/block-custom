@@ -457,15 +457,27 @@ static func _add_solid_faces(
 	chunk_coordinate: Vector2i
 ) -> void:
 	var origin := Vector3(x, y, z)
+	var random_rotation: int = _texture_rotation_steps(
+		chunk_coordinate,
+		x,
+		y,
+		z
+	)
 
-	var uv_rotation_steps: int = 0
-	if _is_uniform_texture_block(block_id):
-		uv_rotation_steps = _texture_rotation_steps(
-			chunk_coordinate,
-			x,
-			y,
-			z
-		)
+	# Uniform-texture blocks keep the existing randomized rotation on all
+	# faces. Grass is different: its side texture stays aligned while only
+	# the top and bottom textures receive a randomized rotation.
+	var top_rotation: int = 0
+	var bottom_rotation: int = 0
+	var side_rotation: int = 0
+
+	if block_id == GRASS:
+		top_rotation = posmod(random_rotation + 1, 4)
+		bottom_rotation = random_rotation
+	elif _is_uniform_texture_block(block_id):
+		top_rotation = random_rotation
+		bottom_rotation = random_rotation
+		side_rotation = random_rotation
 
 	var neighbor: int = snapshot[
 		padded_index(x, y + 1, z)
@@ -479,7 +491,7 @@ static func _add_solid_faces(
 			Vector3.UP,
 			1.0,
 			true,
-			uv_rotation_steps
+			top_rotation
 		)
 
 	neighbor = snapshot[
@@ -494,7 +506,7 @@ static func _add_solid_faces(
 			Vector3.DOWN,
 			1.0,
 			true,
-			uv_rotation_steps
+			bottom_rotation
 		)
 
 	neighbor = snapshot[
@@ -509,7 +521,7 @@ static func _add_solid_faces(
 			Vector3.FORWARD,
 			1.0,
 			true,
-			uv_rotation_steps
+			side_rotation
 		)
 
 	neighbor = snapshot[
@@ -524,7 +536,7 @@ static func _add_solid_faces(
 			Vector3.BACK,
 			1.0,
 			true,
-			uv_rotation_steps
+			side_rotation
 		)
 
 	neighbor = snapshot[
@@ -539,7 +551,7 @@ static func _add_solid_faces(
 			Vector3.LEFT,
 			1.0,
 			true,
-			uv_rotation_steps
+			side_rotation
 		)
 
 	neighbor = snapshot[
@@ -554,7 +566,7 @@ static func _add_solid_faces(
 			Vector3.RIGHT,
 			1.0,
 			true,
-			uv_rotation_steps
+			side_rotation
 		)
 
 
