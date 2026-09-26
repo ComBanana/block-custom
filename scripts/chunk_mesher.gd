@@ -200,56 +200,68 @@ static func build_from_blocks(
 	pos_x_blocks: PackedByteArray,
 	neg_z_blocks: PackedByteArray,
 	pos_z_blocks: PackedByteArray,
-	chunk_coordinate: Vector2i = Vector2i.ZERO
+	chunk_coordinate: Vector2i = Vector2i.ZERO,
+	max_y_exclusive: int = CHUNK_HEIGHT
 ) -> MeshBuffer:
+	max_y_exclusive = clampi(
+		max_y_exclusive,
+		1,
+		CHUNK_HEIGHT
+	)
 	var snapshot := PackedByteArray()
 	snapshot.resize(PADDED_VOLUME)
 	snapshot.fill(AIR)
 
 	_copy_center_blocks(
 		snapshot,
-		center_blocks
+		center_blocks,
+		max_y_exclusive
 	)
 
 	_copy_x_border(
 		snapshot,
 		neg_x_blocks,
 		-1,
-		CHUNK_SIZE - 1
+		CHUNK_SIZE - 1,
+		max_y_exclusive
 	)
 
 	_copy_x_border(
 		snapshot,
 		pos_x_blocks,
 		CHUNK_SIZE,
-		0
+		0,
+		max_y_exclusive
 	)
 
 	_copy_z_border(
 		snapshot,
 		neg_z_blocks,
 		-1,
-		CHUNK_SIZE - 1
+		CHUNK_SIZE - 1,
+		max_y_exclusive
 	)
 
 	_copy_z_border(
 		snapshot,
 		pos_z_blocks,
 		CHUNK_SIZE,
-		0
+		0,
+		max_y_exclusive
 	)
 
-	return build(snapshot, chunk_coordinate)
+	return build(snapshot, chunk_coordinate, max_y_exclusive)
 
 
 static func _copy_center_blocks(
 	snapshot: PackedByteArray,
-	center_blocks: PackedByteArray
+	center_blocks: PackedByteArray,
+	max_y_exclusive: int
 ) -> void:
 	if center_blocks.size() != CHUNK_VOLUME:
 		return
 
-	for y in range(CHUNK_HEIGHT):
+	for y in range(max_y_exclusive):
 		var source_y_base: int = (
 			y * CHUNK_SIZE * CHUNK_SIZE
 		)
@@ -275,12 +287,13 @@ static func _copy_x_border(
 	snapshot: PackedByteArray,
 	neighbor_blocks: PackedByteArray,
 	target_x: int,
-	source_x: int
+	source_x: int,
+	max_y_exclusive: int
 ) -> void:
 	if neighbor_blocks.size() != CHUNK_VOLUME:
 		return
 
-	for y in range(CHUNK_HEIGHT):
+	for y in range(max_y_exclusive):
 		var source_y_base: int = (
 			y * CHUNK_SIZE * CHUNK_SIZE
 		)
@@ -305,12 +318,13 @@ static func _copy_z_border(
 	snapshot: PackedByteArray,
 	neighbor_blocks: PackedByteArray,
 	target_z: int,
-	source_z: int
+	source_z: int,
+	max_y_exclusive: int
 ) -> void:
 	if neighbor_blocks.size() != CHUNK_VOLUME:
 		return
 
-	for y in range(CHUNK_HEIGHT):
+	for y in range(max_y_exclusive):
 		var source_y_base: int = (
 			y * CHUNK_SIZE * CHUNK_SIZE
 		)
@@ -333,13 +347,14 @@ static func _copy_z_border(
 
 static func build(
 	snapshot: PackedByteArray,
-	chunk_coordinate: Vector2i = Vector2i.ZERO
+	chunk_coordinate: Vector2i = Vector2i.ZERO,
+	max_y_exclusive: int = CHUNK_HEIGHT
 ) -> MeshBuffer:
 	var buffer := MeshBuffer.new()
 
 	for x in range(CHUNK_SIZE):
 		for z in range(CHUNK_SIZE):
-			for y in range(CHUNK_HEIGHT):
+			for y in range(max_y_exclusive):
 				var block_id: int = (
 					snapshot[
 						padded_index(
