@@ -61,7 +61,8 @@ class MeshSurface:
 		v2: Vector3,
 		v3: Vector3,
 		normal: Vector3,
-		uv_rotation_steps: int = 0
+		uv_rotation_steps: int = 0,
+		material_layer: int = -1
 	) -> void:
 		var base_index: int = vertices.size()
 
@@ -101,6 +102,14 @@ class MeshSurface:
 					uv_rotation_steps
 				)
 
+		# Pack the opaque material layer into the unused range above U=1.
+		# This keeps the vertex format compact: no extra color/attribute
+		# buffer is required just to select a block texture in the shader.
+		if material_layer >= 0 and material_layer <= 4:
+			var material_offset := float(material_layer) * 2.0
+			for i in range(4):
+				uvs[base_index + i].x += material_offset
+
 		indices.append(base_index)
 		indices.append(base_index + 1)
 		indices.append(base_index + 2)
@@ -111,30 +120,16 @@ class MeshSurface:
 
 
 class MeshBuffer:
-	var grass_top: MeshSurface = MeshSurface.new()
-	var grass_side: MeshSurface = MeshSurface.new()
-	var dirt: MeshSurface = MeshSurface.new()
-	var stone: MeshSurface = MeshSurface.new()
-	var sand: MeshSurface = MeshSurface.new()
+	# All opaque blocks share one geometry surface. The shader selects the
+	# texture from the material layer packed into UV.x.
+	var solid: MeshSurface = MeshSurface.new()
 	var water: MeshSurface = MeshSurface.new()
 	var collision_faces: PackedVector3Array = PackedVector3Array()
 
 	func surface_for_layer(layer: int) -> MeshSurface:
-		match layer:
-			0:
-				return grass_top
-			1:
-				return grass_side
-			2:
-				return dirt
-			3:
-				return stone
-			4:
-				return sand
-			5:
-				return water
-			_:
-				return water
+		if layer == 5:
+			return water
+		return solid
 
 	func add_quad(
 		layer: int,
@@ -151,7 +146,8 @@ class MeshBuffer:
 			v2,
 			v3,
 			normal,
-			uv_rotation_steps
+			uv_rotation_steps,
+			layer
 		)
 
 	func add_collision_quad(
