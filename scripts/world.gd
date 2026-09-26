@@ -44,11 +44,11 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 @export_category("Loading")
 @export var spawn_load_radius: int = 1
-@export var loading_chunks_per_frame: int = 16
-@export var loading_generation_boost: int = 6
+@export var loading_chunks_per_frame: int = 24
+@export var loading_generation_boost: int = 8
 @export var loading_mesh_boost: int = 4
-@export var loading_mesh_apply_boost: int = 4
-@export var loading_collision_boost: int = 3
+@export var loading_mesh_apply_boost: int = 6
+@export var loading_collision_boost: int = 6
 @export var loading_focus_radius: int = 2
 @export var loading_scheduler_scan_limit: int = 64
 @export var loading_mesh_budget_ms: float = 8.0
@@ -56,18 +56,18 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 
 @export_category("Streaming")
-@export var chunks_loaded_per_frame: int = 8
+@export var chunks_loaded_per_frame: int = 12
 @export var max_generation_tasks: int = 8
 @export var max_mesh_tasks: int = 6
 @export var mesh_columns_per_frame: int = 16
 @export var mesh_budget_ms: float = 2.5
 @export var max_mesh_chunks_per_frame: int = 2
-@export var collisions_per_frame: int = 1
-@export var critical_chunk_distance: int = 2
+@export var collisions_per_frame: int = 2
+@export var critical_chunk_distance: int = 3
 
 
 @export_category("Collision")
-@export var collision_distance: int = 2
+@export var collision_distance: int = 3
 
 @export_category("Water")
 @export var water_updates_per_tick: int = 2048
