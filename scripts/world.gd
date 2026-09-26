@@ -1005,6 +1005,8 @@ func process_water_tick() -> void:
 		)
 		water_update_queue_head = 0
 
+	PerformanceProfiler.record_water_tick(processed)
+
 
 func _water_cell_has_open_destination(
 	block_position: Vector3i
@@ -1639,8 +1641,19 @@ func _create_shared_materials() -> void:
 
 
 func _process(delta: float) -> void:
+	var phase_start_usec: int = Time.get_ticks_usec()
 	_update_day_night(delta)
+	PerformanceProfiler.record_phase(
+		"world/day_night",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
+	phase_start_usec = Time.get_ticks_usec()
 	_update_stream_prediction()
+	PerformanceProfiler.record_phase(
+		"world/stream_prediction",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
 	if player_spawned:
 		if statistics_initialized:
@@ -1656,46 +1669,155 @@ func _process(delta: float) -> void:
 
 		if save_accumulator >= SAVE_INTERVAL:
 			save_accumulator = 0.0
+			var save_start_usec: int = Time.get_ticks_usec()
 			save_world()
+			PerformanceProfiler.record_phase(
+				"world/autosave",
+				float(Time.get_ticks_usec() - save_start_usec) / 1000.0
+			)
 
 		var current_chunk := world_to_chunk(
 			player.global_position
 		)
 
 		if current_chunk != player_chunk:
+			var previous_chunk: Vector2i = player_chunk
+			var boundary_start_usec: int = Time.get_ticks_usec()
+
 			player_chunk = current_chunk
 
+			var update_chunks_start_usec: int = Time.get_ticks_usec()
 			update_chunks()
+			var update_chunks_ms: float = (
+				float(Time.get_ticks_usec() - update_chunks_start_usec)
+				/ 1000.0
+			)
+			PerformanceProfiler.record_phase(
+				"world/chunk_transition/update_chunks",
+				update_chunks_ms
+			)
 
+			var render_region_start_usec: int = Time.get_ticks_usec()
+			var boundary_changes: Array[Vector2i] = []
 			if render_regions != null:
-				var boundary_changes: Array[Vector2i] = render_regions.update_center(
+				boundary_changes = render_regions.update_center(
 					player_chunk
 				)
-				for boundary_chunk in boundary_changes:
-					if not loaded_chunks.has(boundary_chunk):
-						continue
-					var boundary_node = loaded_chunks[boundary_chunk]
-					if render_regions.is_chunk_batched(boundary_chunk):
-						boundary_node.clear_visual_meshes()
-						render_regions.mark_chunk_dirty(boundary_chunk)
-					else:
-						enqueue_mesh_chunk(boundary_chunk)
+			var render_region_ms: float = (
+				float(Time.get_ticks_usec() - render_region_start_usec)
+				/ 1000.0
+			)
+			PerformanceProfiler.record_phase(
+				"world/chunk_transition/render_regions",
+				render_region_ms
+			)
 
+			var boundary_visual_start_usec: int = Time.get_ticks_usec()
+			for boundary_chunk in boundary_changes:
+				if not loaded_chunks.has(boundary_chunk):
+					continue
+				var boundary_node = loaded_chunks[boundary_chunk]
+				if render_regions != null and render_regions.is_chunk_batched(boundary_chunk):
+					boundary_node.clear_visual_meshes()
+					render_regions.mark_chunk_dirty(boundary_chunk)
+				else:
+					enqueue_mesh_chunk(boundary_chunk)
+			var boundary_visual_ms: float = (
+				float(Time.get_ticks_usec() - boundary_visual_start_usec)
+				/ 1000.0
+			)
+			PerformanceProfiler.record_phase(
+				"world/chunk_transition/boundary_visuals",
+				boundary_visual_ms
+			)
+
+			var collision_range_start_usec: int = Time.get_ticks_usec()
 			update_collision_range()
+			var collision_range_ms: float = (
+				float(Time.get_ticks_usec() - collision_range_start_usec)
+				/ 1000.0
+			)
+			PerformanceProfiler.record_phase(
+				"world/chunk_transition/collision_range",
+				collision_range_ms
+			)
 
+			var total_boundary_ms: float = (
+				float(Time.get_ticks_usec() - boundary_start_usec)
+				/ 1000.0
+			)
+
+			PerformanceProfiler.record_chunk_boundary(
+				previous_chunk,
+				player_chunk,
+				delta,
+				update_chunks_ms,
+				render_region_ms,
+				boundary_visual_ms,
+				collision_range_ms,
+				total_boundary_ms,
+				boundary_changes.size(),
+				{
+					"player_position": [
+						player.global_position.x,
+						player.global_position.y,
+						player.global_position.z
+					],
+					"loaded_chunks": loaded_chunks.size(),
+					"required_chunks": required_chunks.size(),
+					"load_queue": load_queue.size(),
+					"generation_queue": generation_queue.size(),
+					"critical_generation_queue": critical_generation_queue.size(),
+					"generation_tasks": generation_tasks.size(),
+					"critical_mesh_queue": critical_mesh_queue.size(),
+					"near_mesh_queue": near_mesh_queue.size(),
+					"far_mesh_queue": far_mesh_queue.size(),
+					"water_mesh_queue": water_mesh_queue.size(),
+					"mesh_tasks": mesh_tasks.size(),
+					"collision_queue": collision_queue.size()
+				}
+			)
+
+	phase_start_usec = Time.get_ticks_usec()
 	process_load_queue()
+	PerformanceProfiler.record_phase(
+		"world/process_load_queue",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
+	phase_start_usec = Time.get_ticks_usec()
 	process_generation_queue()
+	PerformanceProfiler.record_phase(
+		"world/process_generation_queue",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
 	if player_spawned:
+		phase_start_usec = Time.get_ticks_usec()
 		_refill_mesh_stream_queue()
+		PerformanceProfiler.record_phase(
+			"world/refill_mesh_stream_queue",
+			float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+		)
 
 	# Gameplay simulation is fixed at 20 ticks per second. Rendering and
 	# asynchronous chunk workers remain frame/worker driven independently.
+	phase_start_usec = Time.get_ticks_usec()
 	process_game_ticks(delta)
+	PerformanceProfiler.record_phase(
+		"world/process_game_ticks",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
+	phase_start_usec = Time.get_ticks_usec()
 	process_mesh_queue()
+	PerformanceProfiler.record_phase(
+		"world/process_mesh_queue",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
 	if render_regions != null and (startup_rendering or player_spawned):
+		phase_start_usec = Time.get_ticks_usec()
 		var region_worker_slots := maxi(
 			0,
 			_background_worker_capacity()
@@ -1707,16 +1829,51 @@ func _process(delta: float) -> void:
 			1,
 			1.0
 		)
+		PerformanceProfiler.record_phase(
+			"world/process_render_regions",
+			float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+		)
 
+	phase_start_usec = Time.get_ticks_usec()
 	process_collision_queue()
+	PerformanceProfiler.record_phase(
+		"world/process_collision_queue",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
+	phase_start_usec = Time.get_ticks_usec()
 	_process_pending_teleport()
+	PerformanceProfiler.record_phase(
+		"world/process_pending_teleport",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
 	if not player_spawned:
+		phase_start_usec = Time.get_ticks_usec()
 		if startup_rendering:
 			try_start_gameplay()
 		else:
 			update_loading_progress()
 			try_spawn_player()
+		PerformanceProfiler.record_phase(
+			"world/loading_phase",
+			float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+		)
+
+	PerformanceProfiler.set_world_state({
+		"player_chunk": [player_chunk.x, player_chunk.y],
+		"loaded_chunks": loaded_chunks.size(),
+		"required_chunks": required_chunks.size(),
+		"generation_tasks": generation_tasks.size(),
+		"mesh_tasks": mesh_tasks.size(),
+		"load_queue": load_queue.size(),
+		"generation_queue": generation_queue.size(),
+		"critical_mesh_queue": critical_mesh_queue.size(),
+		"near_mesh_queue": near_mesh_queue.size(),
+		"far_mesh_queue": far_mesh_queue.size(),
+		"water_mesh_queue": water_mesh_queue.size(),
+		"collision_queue": collision_queue.size()
+	})
 
 
 # ===================================================================
@@ -1733,6 +1890,7 @@ func queue_player_block_update(
 	update.position = block_position
 	update.block_id = block_id
 	pending_block_updates.append(update)
+	PerformanceProfiler.record_block_action()
 
 
 func process_block_update_tick() -> void:
@@ -1753,8 +1911,20 @@ func process_game_tick() -> void:
 
 	# Block changes happen first, then fluid ticks react to the resulting
 	# block states in the same authoritative game tick.
+	var block_updates_start_usec: int = Time.get_ticks_usec()
 	process_block_update_tick()
+	PerformanceProfiler.record_phase(
+		"simulation/block_updates",
+		float(Time.get_ticks_usec() - block_updates_start_usec) / 1000.0
+	)
+
+	var water_tick_start_usec: int = Time.get_ticks_usec()
 	process_water_tick()
+	PerformanceProfiler.record_phase(
+		"simulation/water_tick",
+		float(Time.get_ticks_usec() - water_tick_start_usec) / 1000.0
+	)
+
 
 
 func process_game_ticks(delta: float) -> void:
@@ -4279,6 +4449,40 @@ func try_start_gameplay() -> void:
 		"world_loading",
 		generation_profiler.get_elapsed_ms()
 	)
+
+	PerformanceProfiler.start_session({
+		"project_version": str(
+			ProjectSettings.get_setting(
+				"application/config/version",
+				"unknown"
+			)
+		),
+		"godot_version": str(
+			Engine.get_version_info().get(
+				"string",
+				"unknown"
+			)
+		),
+		"renderer_method": str(
+			ProjectSettings.get_setting(
+				"rendering/renderer/rendering_method",
+				"unknown"
+			)
+		),
+		"window_size": [
+			DisplayServer.window_get_size().x,
+			DisplayServer.window_get_size().y
+		],
+		"viewport_size": [
+			get_viewport().get_visible_rect().size.x,
+			get_viewport().get_visible_rect().size.y
+		],
+		"render_distance": render_distance,
+		"world_name": world_name,
+		"water_tick_rate": GAME_TICKS_PER_SECOND,
+		"water_tick_delay": water_tick_delay
+	})
+
 	print(generation_profiler.get_summary())
 
 
@@ -4301,6 +4505,10 @@ func _save_all_loaded_generated_chunks() -> void:
 
 
 func _exit_tree() -> void:
+
+	PerformanceProfiler.finish_session({
+		"generation_profile": generation_profiler.get_snapshot()
+	})
 
 	save_world()
 	_save_all_loaded_generated_chunks()
