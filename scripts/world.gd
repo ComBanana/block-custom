@@ -1668,7 +1668,7 @@ func _process(delta: float) -> void:
 			update_chunks()
 
 			if render_regions != null:
-				var boundary_changes := render_regions.update_center(
+				var boundary_changes: Array[Vector2i] = render_regions.update_center(
 					player_chunk
 				)
 				for boundary_chunk in boundary_changes:
