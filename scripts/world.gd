@@ -1279,6 +1279,8 @@ func _ready() -> void:
 
 	update_chunks()
 
+	if render_regions != null:
+		render_regions.update_center(player_chunk)
 
 
 func _apply_fog_settings() -> void:
@@ -3071,6 +3073,53 @@ func _loading_mesh_neighbors_ready(
 # ===================================================================
 # Water visual mesh queue
 # ===================================================================
+
+func _capture_render_region_snapshot(
+	chunk_coord: Vector2i
+) -> Dictionary:
+	if not loaded_chunks.has(chunk_coord):
+		return {}
+
+	var chunk = loaded_chunks[chunk_coord]
+
+	if not chunk.is_generated:
+		return {}
+
+	return {
+		"blocks": chunk.blocks.duplicate(),
+		"max_y_exclusive": chunk.mesh_max_y_exclusive,
+		"revision": chunk.mesh_data_revision
+	}
+
+
+func _on_render_region_visibility_changed(
+	chunk_coord: Vector2i,
+	in_region: bool
+) -> void:
+	if not loaded_chunks.has(chunk_coord):
+		return
+
+	var chunk = loaded_chunks[chunk_coord]
+
+	if not chunk.is_generated:
+		return
+
+	if in_region:
+		if render_regions != null and render_regions.is_chunk_batched(
+			chunk_coord
+		):
+			chunk.clear_visual_meshes()
+		return
+
+	# The chunk has moved back into the individually rendered near ring.
+	# Its old regional representation no longer covers it, so build its
+	# independent mesh again.
+	chunk.get_node("ChunkMesh").visible = true
+	chunk.get_node("WaterMesh").visible = true
+
+	if not chunk.mesh_ready and not chunk.mesh_building:
+		enqueue_mesh_chunk(chunk_coord)
+
 
 func enqueue_water_mesh_chunk(
 	chunk_coord: Vector2i
