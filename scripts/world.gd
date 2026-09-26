@@ -107,9 +107,12 @@ const STONE_TEXTURE := preload("res://textures/stone.png")
 const SAND_TEXTURE := preload("res://textures/sand.png")
 const WATER_TEXTURE := preload("res://textures/water.png")
 const SOLID_CHUNK_SHADER := preload("res://shaders/chunk_solid.gdshader")
+const WORLD_RENDER_REGIONS := preload("res://scripts/world_render_regions.gd")
 
 var solid_material: ShaderMaterial
 var water_material: StandardMaterial3D
+var render_regions: WorldRenderRegions
+var render_region_root: Node3D
 
 var moon_light: DirectionalLight3D
 var sun_visual: MeshInstance3D
@@ -1256,6 +1259,18 @@ func _ready() -> void:
 	_apply_fog_settings()
 	_update_day_night(0.0)
 
+	render_region_root = Node3D.new()
+	render_region_root.name = "RenderRegions"
+	add_child(render_region_root)
+
+	render_regions = WORLD_RENDER_REGIONS.new(
+	render_region_root,
+	solid_material,
+	water_material,
+	Callable(self, "_capture_render_region_snapshot"),
+	Callable(self, "_on_render_region_visibility_changed")
+)
+
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	player_chunk = world_to_chunk(
@@ -1649,6 +1664,21 @@ func _process(delta: float) -> void:
 			player_chunk = current_chunk
 
 			update_chunks()
+
+			if render_regions != null:
+				var boundary_changes := render_regions.update_center(
+					player_chunk
+				)
+				for boundary_chunk in boundary_changes:
+					if not loaded_chunks.has(boundary_chunk):
+						continue
+					var boundary_node = loaded_chunks[boundary_chunk]
+					if render_regions.is_chunk_batched(boundary_chunk):
+						boundary_node.clear_visual_meshes()
+						render_regions.mark_chunk_dirty(boundary_chunk)
+					else:
+						enqueue_mesh_chunk(boundary_chunk)
+
 			update_collision_range()
 
 	process_load_queue()
@@ -1662,6 +1692,20 @@ func _process(delta: float) -> void:
 	process_game_ticks(delta)
 
 	process_mesh_queue()
+
+	if render_regions != null and (startup_rendering or player_spawned):
+		var region_worker_slots := maxi(
+			0,
+			_background_worker_capacity()
+			- generation_tasks.size()
+			- mesh_tasks.size()
+		)
+		render_regions.process(
+			mini(1, region_worker_slots),
+			1,
+			1.0
+		)
+
 	process_collision_queue()
 	_process_pending_teleport()
 
@@ -2533,6 +2577,9 @@ func load_chunk(
 
 	add_child(chunk)
 
+	if render_regions != null:
+		render_regions.register_chunk(chunk_coord)
+
 	var expected_size: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
 	var saved_blocks: PackedByteArray = WorldStore.load_chunk(
 		world_name,
@@ -2689,6 +2736,9 @@ func process_generation_queue() -> void:
 			generated_data
 		)
 
+		if render_regions != null:
+			render_regions.mark_chunk_dirty(chunk_coord)
+
 		# Generated chunks become part of the persistent world cache.
 		# Keep this separate from edit dirtiness so periodic autosaves do
 		# not repeatedly write the whole render-distance area.
@@ -2700,10 +2750,12 @@ func process_generation_queue() -> void:
 		enqueue_water_updates_for_chunk(
 			chunk_coord
 		)
-		enqueue_mesh_chunk(
-			chunk_coord
-		)
 
+		if (
+			render_regions == null
+			or not render_regions.is_chunk_batched(chunk_coord)
+		):
+			enqueue_mesh_chunk(chunk_coord)
 
 		enqueue_neighbor_meshes(
 			chunk_coord
@@ -2844,9 +2896,14 @@ func enqueue_neighbor_meshes(
 		if not neighbor.is_generated:
 			continue
 
-		# If the neighbor is currently building its mesh,
-		# cancel that partial build. Its border may have
-		# been generated against an incomplete neighbor.
+		if render_regions != null and render_regions.is_chunk_batched(
+			neighbor_coordinate
+		):
+			render_regions.mark_chunk_dirty(neighbor_coordinate)
+			continue
+
+		# Only individual near chunks need their current worker cancelled
+		# when a newly generated neighbor changes their border.
 		if neighbor.mesh_building:
 			neighbor.cancel_mesh_build()
 
@@ -2879,6 +2936,10 @@ func enqueue_mesh_chunk(
 	]
 
 	if not chunk.is_generated:
+		return
+
+	if render_regions != null and render_regions.is_chunk_batched(chunk_coord):
+		render_regions.mark_chunk_dirty(chunk_coord)
 		return
 
 	# A normal chunk/neighbor/player rebuild contains the latest water state,
@@ -3027,6 +3088,10 @@ func enqueue_water_mesh_chunk(
 	var chunk = loaded_chunks[chunk_coord]
 
 	if not chunk.is_generated:
+		return
+
+	if render_regions != null and render_regions.is_chunk_batched(chunk_coord):
+		render_regions.mark_chunk_dirty(chunk_coord)
 		return
 
 	# The normal mesh pipeline is responsible for chunks that have not
@@ -3258,6 +3323,22 @@ func process_mesh_queue() -> void:
 		var chunk = loaded_chunks[result.chunk_coordinate]
 
 		if not chunk.is_generated:
+			continue
+
+		# The player may have crossed the individual/region boundary while
+		# this worker was running. Do not apply an individual mesh to a chunk
+		# that is now represented by a batched render region.
+		if (
+			render_regions != null
+			and render_regions.is_chunk_batched(
+				result.chunk_coordinate
+			)
+		):
+			chunk.mesh_building = false
+			chunk.mesh_rebuild_requested = false
+			render_regions.mark_chunk_dirty(
+				result.chunk_coordinate
+			)
 			continue
 
 		# A newer edit or neighbor change may have invalidated
@@ -3601,6 +3682,9 @@ func unload_chunk(
 		generated_cache_pending.erase(chunk_coord)
 		dirty_chunks.erase(chunk_coord)
 
+	if render_regions != null:
+		render_regions.remove_chunk(chunk_coord)
+
 	loaded_chunks.erase(
 		chunk_coord
 	)
@@ -3752,6 +3836,9 @@ func set_block_world(
 		local_z,
 		block_id
 	)
+
+	if render_regions != null:
+		render_regions.mark_chunk_dirty(chunk_coord)
 
 	# Every block-state mutation gets its own revision. Worker mesh jobs use
 	# this to reject snapshots that were captured before the mutation.
@@ -4158,6 +4245,10 @@ func _exit_tree() -> void:
 
 	save_world()
 	_save_all_loaded_generated_chunks()
+
+	if render_regions != null:
+		render_regions.shutdown()
+		render_regions = null
 
 	for task_id in generation_tasks:
 		var wait_error: Error = (
