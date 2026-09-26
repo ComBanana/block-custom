@@ -33,6 +33,7 @@ enum GenerationStage {
 }
 
 
+const SOLID_CHUNK_SHADER := preload("res://shaders/chunk_solid.gdshader")
 const GRASS_SIDE_TEXTURE := preload("res://textures/grass-side.png")
 const GRASS_TOP_TEXTURE := preload("res://textures/grass-top.png")
 const DIRT_TEXTURE := preload("res://textures/dirt.png")
@@ -63,11 +64,7 @@ var water_mesh_rebuild_requested: bool = false
 var terrain_x: int = 0
 var mesh_x: int = 0
 
-var grass_side_material: StandardMaterial3D
-var grass_top_material: StandardMaterial3D
-var dirt_material: StandardMaterial3D
-var stone_material: StandardMaterial3D
-var sand_material: StandardMaterial3D
+var solid_material: ShaderMaterial
 var water_material: StandardMaterial3D
 
 var mesh_job_id: int = 0
@@ -87,31 +84,30 @@ func is_generation_stage_at_least(stage: GenerationStage) -> bool:
 
 func _ready() -> void:
 	# World assigns shared materials before this node enters the tree.
-	# The fallback creation keeps Chunk.tscn safe to instantiate by itself.
-	if grass_side_material == null:
-		grass_side_material = StandardMaterial3D.new()
-		grass_side_material.albedo_texture = GRASS_SIDE_TEXTURE
-		grass_side_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	if grass_top_material == null:
-		grass_top_material = StandardMaterial3D.new()
-		grass_top_material.albedo_texture = GRASS_TOP_TEXTURE
-		grass_top_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	if dirt_material == null:
-		dirt_material = StandardMaterial3D.new()
-		dirt_material.albedo_texture = DIRT_TEXTURE
-		dirt_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	if stone_material == null:
-		stone_material = StandardMaterial3D.new()
-		stone_material.albedo_texture = STONE_TEXTURE
-		stone_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-
-	if sand_material == null:
-		sand_material = StandardMaterial3D.new()
-		sand_material.albedo_texture = SAND_TEXTURE
-		sand_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# The fallback keeps Chunk.tscn safe to instantiate by itself.
+	if solid_material == null:
+		solid_material = ShaderMaterial.new()
+		solid_material.shader = SOLID_CHUNK_SHADER
+		solid_material.set_shader_parameter(
+			"grass_top_texture",
+			GRASS_TOP_TEXTURE
+		)
+		solid_material.set_shader_parameter(
+			"grass_side_texture",
+			GRASS_SIDE_TEXTURE
+		)
+		solid_material.set_shader_parameter(
+			"dirt_texture",
+			DIRT_TEXTURE
+		)
+		solid_material.set_shader_parameter(
+			"stone_texture",
+			STONE_TEXTURE
+		)
+		solid_material.set_shader_parameter(
+			"sand_texture",
+			SAND_TEXTURE
+		)
 
 	if water_material == null:
 		water_material = StandardMaterial3D.new()
@@ -548,28 +544,8 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 
 	_add_mesh_surface(
 		solid_mesh,
-		grass_top_material,
-		buffer.grass_top
-	)
-	_add_mesh_surface(
-		solid_mesh,
-		grass_side_material,
-		buffer.grass_side
-	)
-	_add_mesh_surface(
-		solid_mesh,
-		dirt_material,
-		buffer.dirt
-	)
-	_add_mesh_surface(
-		solid_mesh,
-		stone_material,
-		buffer.stone
-	)
-	_add_mesh_surface(
-		solid_mesh,
-		sand_material,
-		buffer.sand
+		solid_material,
+		buffer.solid
 	)
 	_add_mesh_surface(
 		water_mesh,
