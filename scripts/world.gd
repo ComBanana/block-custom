@@ -3002,8 +3002,6 @@ func load_chunk(
 	chunk_coord: Vector2i
 ) -> void:
 
-	pending_chunk_saves.erase(chunk_coord)
-
 	var chunk = chunk_scene.instantiate()
 	chunk.set_generation_stage(
 		Chunk.GenerationStage.LOADING
@@ -3036,10 +3034,18 @@ func load_chunk(
 		render_regions.register_chunk(chunk_coord)
 
 	var expected_size: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
-	var saved_blocks: PackedByteArray = WorldStore.load_chunk(
-		world_name,
-		chunk_coord
-	)
+
+	# A deferred unload save can still be waiting when the player returns to
+	# the same chunk. Its in-memory snapshot is newer than the disk copy and
+	# must be used so edits are never rolled back.
+	var saved_blocks: PackedByteArray = PackedByteArray()
+	if pending_chunk_saves.has(chunk_coord):
+		saved_blocks = pending_chunk_saves[chunk_coord]
+	else:
+		saved_blocks = WorldStore.load_chunk(
+			world_name,
+			chunk_coord
+		)
 
 	var migrated_blocks := _migrate_saved_chunk_data(
 		saved_blocks,
