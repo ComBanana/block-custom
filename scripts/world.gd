@@ -52,6 +52,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var loading_focus_radius: int = 2
 @export var loading_scheduler_scan_limit: int = 64
 @export var loading_mesh_budget_ms: float = 8.0
+@export var startup_mesh_radius: int = 4
 @export var interactive_worker_reserve: int = 1
 
 
@@ -62,6 +63,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var mesh_columns_per_frame: int = 16
 @export var mesh_budget_ms: float = 2.5
 @export var max_mesh_chunks_per_frame: int = 2
+@export var gameplay_mesh_tasks: int = 3
+@export var gameplay_mesh_apply_limit: int = 1
+@export var gameplay_mesh_queue_target: int = 12
+@export var gameplay_mesh_refill_per_frame: int = 3
 @export var collisions_per_frame: int = 2
 @export var critical_chunk_distance: int = 3
 
@@ -152,6 +157,11 @@ var loaded_chunks: Dictionary = {}
 var required_chunks: Dictionary = {}
 # Stable player-centered spiral order used for loading and rendering.
 var stream_order: Dictionary = {}
+
+# Lazy post-spawn mesh plan. Only a small working set is queued at once;
+# the remaining generated chunks are fed into the mesh pipeline gradually.
+var mesh_stream_offsets: Array[Vector2i] = []
+var mesh_stream_cursor: int = 0
 
 # Temporary high-priority area kept loaded while a teleport is being prepared.
 var teleport_required_chunks: Dictionary = {}
@@ -1644,6 +1654,9 @@ func _process(delta: float) -> void:
 	process_load_queue()
 	process_generation_queue()
 
+	if player_spawned:
+		_refill_mesh_stream_queue()
+
 	# Gameplay simulation is fixed at 20 ticks per second. Rendering and
 	# asynchronous chunk workers remain frame/worker driven independently.
 	process_game_ticks(delta)
@@ -1846,7 +1859,12 @@ func _mesh_task_limit() -> int:
 		return 0
 
 	var limit := max_mesh_tasks
-	if not player_spawned:
+	if player_spawned:
+		limit = mini(
+			maxi(1, gameplay_mesh_tasks),
+			max_mesh_tasks
+		)
+	else:
 		limit += loading_mesh_boost
 
 	return mini(limit, _available_worker_budget())
@@ -1855,7 +1873,9 @@ func _mesh_task_limit() -> int:
 func _mesh_apply_limit() -> int:
 	var limit := max_mesh_chunks_per_frame
 
-	if not player_spawned:
+	if player_spawned:
+		limit = gameplay_mesh_apply_limit
+	else:
 		limit += loading_mesh_apply_boost
 
 	return maxi(limit, 1)
@@ -2350,6 +2370,18 @@ func update_chunks() -> void:
 	# Build the active area in a true square spiral:
 	# player -> immediate neighbors -> progressively farther rings.
 	var spiral_offsets := _build_spiral_offsets(render_distance)
+	mesh_stream_offsets = spiral_offsets
+	mesh_stream_cursor = 0
+
+	if player_spawned:
+		# Pending background work from the old player position is no longer
+		# useful. Keep active worker jobs running, but rebuild the queued
+		# working set around the new player position.
+		near_mesh_queue.clear()
+		near_mesh_queued.clear()
+		far_mesh_queue.clear()
+		far_mesh_queued.clear()
+		_queue_startup_mesh_area()
 
 	for index in range(spiral_offsets.size()):
 		var chunk_coord: Vector2i = (
@@ -3980,10 +4012,98 @@ func try_spawn_player():
 	# is actually ready.
 	startup_rendering = true
 
-	for chunk_coord in required_chunks:
-		enqueue_mesh_chunk(chunk_coord)
+	# Do not enqueue the entire render-distance mesh set here. At RD=32
+	# that would immediately submit thousands of background mesh builds
+	# after spawn. Bootstrap only the area needed to release the player;
+	# the rest is streamed into the mesh queue gradually.
+	_queue_startup_mesh_area()
 
 	loading_screen.finish()
+
+
+func _queue_startup_mesh_area() -> void:
+	if not startup_rendering and not player_spawned:
+		return
+
+	var radius: int = maxi(
+		startup_mesh_radius,
+		collision_distance
+	)
+
+	while (
+		mesh_stream_cursor < mesh_stream_offsets.size()
+	):
+		var offset: Vector2i = mesh_stream_offsets[mesh_stream_cursor]
+		var distance := maxi(
+			abs(offset.x),
+			abs(offset.y)
+		)
+
+		if distance > radius:
+			break
+
+		var chunk_coord := player_chunk + offset
+		mesh_stream_cursor += 1
+
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if not chunk.is_generated:
+			continue
+
+		if chunk.mesh_ready or chunk.mesh_building:
+			continue
+
+		enqueue_mesh_chunk(chunk_coord)
+
+
+func _refill_mesh_stream_queue() -> void:
+	if not player_spawned:
+		return
+
+	var queued_normal: int = (
+		critical_mesh_queue.size()
+		+ near_mesh_queue.size()
+		+ far_mesh_queue.size()
+	)
+
+	var target: int = maxi(
+		1,
+		gameplay_mesh_queue_target
+	)
+	var add_limit: int = maxi(
+		1,
+		gameplay_mesh_refill_per_frame
+	)
+	var added: int = 0
+
+	while (
+		added < add_limit
+		and queued_normal < target
+		and mesh_stream_cursor < mesh_stream_offsets.size()
+	):
+		var offset: Vector2i = mesh_stream_offsets[mesh_stream_cursor]
+		mesh_stream_cursor += 1
+
+		var chunk_coord := player_chunk + offset
+
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if (
+			not chunk.is_generated
+			or chunk.mesh_ready
+			or chunk.mesh_building
+		):
+			continue
+
+		enqueue_mesh_chunk(chunk_coord)
+		added += 1
+		queued_normal += 1
 
 
 func try_start_gameplay() -> void:
