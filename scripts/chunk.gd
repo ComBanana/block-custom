@@ -75,6 +75,9 @@ var water_material: StandardMaterial3D
 var mesh_job_id: int = 0
 # Incremented when solid terrain geometry/texture data changes. Pure fluid
 # mutations do not invalidate an in-progress solid mesh build.
+var data_revision: int = 0
+# Incremented when solid terrain geometry/texture data changes. Pure fluid
+# mutations do not invalidate an in-progress solid mesh build.
 var mesh_data_revision: int = 0
 # Incremented when fluid voxel data changes. Water-only mesh workers use this
 # revision so large fluid events do not invalidate solid terrain work.
@@ -118,6 +121,7 @@ func reset_for_reuse() -> void:
 
 	terrain_x = 0
 	mesh_x = 0
+	data_revision += 1
 	mesh_data_revision += 1
 	water_data_revision += 1
 	collision_faces = PackedVector3Array()
@@ -640,6 +644,7 @@ func apply_generated_data(
 	blocks_compressed = false
 	blocks = generated_blocks
 	_recalculate_mesh_max_y()
+	data_revision += 1
 	mesh_data_revision += 1
 	water_data_revision += 1
 	set_generation_stage(GenerationStage.TERRAIN_READY)
