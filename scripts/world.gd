@@ -77,7 +77,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var max_cached_chunk_data: int = 256
 @export var chunk_release_per_frame: int = 8
 @export var chunk_release_budget_ms: float = 0.8
-@export var chunk_reuse_pool_limit: int = 96
+@export var chunk_reuse_pool_limit: int = 128
 
 
 @export_category("Collision")
@@ -1853,6 +1853,15 @@ func _process(delta: float) -> void:
 				}
 			)
 
+	# Release a small batch before loading so boundary unloads can be
+	# recycled into new chunk nodes in the same frame.
+	phase_start_usec = Time.get_ticks_usec()
+	process_deferred_chunk_releases()
+	PerformanceProfiler.record_phase(
+		"world/process_deferred_chunk_releases",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
 	phase_start_usec = Time.get_ticks_usec()
 	process_load_queue()
 	PerformanceProfiler.record_phase(
@@ -1871,13 +1880,6 @@ func _process(delta: float) -> void:
 	process_pending_chunk_saves()
 	PerformanceProfiler.record_phase(
 		"world/process_pending_chunk_saves",
-		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
-	)
-
-	phase_start_usec = Time.get_ticks_usec()
-	process_deferred_chunk_releases()
-	PerformanceProfiler.record_phase(
-		"world/process_deferred_chunk_releases",
 		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
 	)
 
