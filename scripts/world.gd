@@ -2465,7 +2465,8 @@ func is_chunk_ready_for_player(
 
 	return (
 		chunk.is_generated
-		and chunk.collision_available
+		and chunk.mesh_ready
+		and chunk.collision_ready
 	)
 
 
@@ -5647,7 +5648,7 @@ func try_start_gameplay() -> void:
 
 	# Only the player's own chunk must be fully collidable before input is
 	# unlocked. Neighboring collision builds continue without freezing input.
-	if not spawn_chunk.mesh_ready or not spawn_chunk.collision_available:
+	if not spawn_chunk.mesh_ready or not spawn_chunk.collision_ready:
 		return
 
 	startup_rendering = false
