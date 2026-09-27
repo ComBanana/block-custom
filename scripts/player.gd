@@ -488,6 +488,85 @@ func _is_crouch_active() -> bool:
 	return Input.is_action_pressed("crouch")
 
 
+func get_persistent_state() -> Dictionary:
+	return {
+		"velocity_x": velocity.x,
+		"velocity_y": velocity.y,
+		"velocity_z": velocity.z,
+		"is_crouching": is_crouching,
+		"swimming_mode": swimming_mode,
+		"crawling_mode": crawling_mode,
+		"sprint_toggled": sprint_toggled,
+		"crouch_toggled": crouch_toggled,
+		"selected_hotbar_slot": selected_hotbar_slot,
+		"current_pose": current_pose
+	}
+
+
+func apply_persistent_state(state: Dictionary) -> void:
+	if state.is_empty():
+		return
+
+	velocity = Vector3(
+		float(state.get("velocity_x", 0.0)),
+		float(state.get("velocity_y", 0.0)),
+		float(state.get("velocity_z", 0.0))
+	)
+
+	sprint_toggled = bool(
+		state.get("sprint_toggled", false)
+	)
+	crouch_toggled = bool(
+		state.get("crouch_toggled", false)
+	)
+	is_crouching = bool(
+		state.get("is_crouching", false)
+	)
+
+	swimming_mode = bool(
+		state.get("swimming_mode", false)
+	)
+	crawling_mode = bool(
+		state.get("crawling_mode", false)
+	)
+
+	var saved_slot: int = int(
+		state.get("selected_hotbar_slot", 0)
+	)
+	saved_slot = clampi(
+		saved_slot,
+		0,
+		HOTBAR_BLOCKS.size() - 1
+	)
+	select_hotbar_slot(saved_slot)
+
+	var saved_pose := str(
+		state.get("current_pose", "standing")
+	)
+
+	# Restore the exact compact collision pose before controls are enabled.
+	# World calls this only after the relevant collision data has loaded, so
+	# a saved crawl cannot be replaced by the default standing hitbox while
+	# the player is underneath a block.
+	match saved_pose:
+		"swim":
+			swimming_mode = true
+			crawling_mode = false
+			_apply_pose("swim", true)
+		"crawl":
+			swimming_mode = false
+			crawling_mode = true
+			_apply_pose("crawl", true)
+		"crouch":
+			swimming_mode = false
+			crawling_mode = false
+			_apply_pose("crouch", true)
+		_:
+			swimming_mode = false
+			crawling_mode = false
+			_apply_pose("standing", true)
+
+
 func enable_controls() -> void:
 	controls_enabled = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
