@@ -680,23 +680,16 @@ func cancel_mesh_build() -> void:
 			)
 
 
-func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
+func apply_solid_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	var solid_mesh := ArrayMesh.new()
-	var water_mesh := ArrayMesh.new()
 
 	_add_mesh_surface(
 		solid_mesh,
 		solid_material,
 		buffer.solid
 	)
-	_add_mesh_surface(
-		water_mesh,
-		water_material,
-		buffer.water
-	)
 
 	$ChunkMesh.mesh = solid_mesh
-	$WaterMesh.mesh = water_mesh
 
 	# Packed arrays from the worker can be handed across directly;
 	# avoid another full conversion/copy on the main thread.
@@ -707,6 +700,20 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	# Preserve collision_available: an older collision shape is still valid
 	# until the replacement is built on the main thread.
 	set_generation_stage(GenerationStage.MESH_READY)
+
+
+func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
+	apply_solid_mesh_buffer(buffer)
+
+	var water_mesh := ArrayMesh.new()
+
+	_add_mesh_surface(
+		water_mesh,
+		water_material,
+		buffer.water
+	)
+
+	$WaterMesh.mesh = water_mesh
 
 
 func apply_water_mesh(water_surface: ChunkMesher.MeshSurface) -> void:
