@@ -4881,7 +4881,7 @@ func process_pending_chunk_saves() -> void:
 			and render_regions != null
 		):
 			var loaded_chunk_for_compression = loaded_chunks[chunk_coord]
-			var distance_from_player := max(
+			var distance_from_player: int = maxi(
 				abs(chunk_coord.x - player_chunk.x),
 				abs(chunk_coord.y - player_chunk.y)
 			)
