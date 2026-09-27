@@ -4706,13 +4706,14 @@ func unload_chunk(
 	chunk.visible = false
 	chunk.clear_collision()
 
-	# Keep the latest voxel snapshot in RAM. The persistence queue still writes
+	# Keep generated voxel data in RAM. The persistence queue still writes
 	# it to disk, so this is an acceleration cache rather than a replacement for
-	# the save system.
-	_cache_unloaded_chunk_data(
-		chunk_coord,
-		chunk.blocks
-	)
+	# the save system. Never cache a chunk that has not finished generation.
+	if chunk.is_generated:
+		_cache_unloaded_chunk_data(
+			chunk_coord,
+			chunk.blocks
+		)
 
 	loaded_chunks.erase(
 		chunk_coord
@@ -4754,9 +4755,10 @@ func unload_chunk(
 		chunk_coord
 	)
 
-	if not chunk_release_queued.has(chunk_coord):
-		chunk_release_queue.append(chunk)
-		chunk_release_queued[chunk_coord] = chunk
+	# Multiple generations of the same coordinate may briefly coexist while
+	# a player turns around quickly. Every node still needs its own release.
+	chunk_release_queue.append(chunk)
+	chunk_release_queued[chunk_coord] = chunk
 
 
 # ===================================================================
