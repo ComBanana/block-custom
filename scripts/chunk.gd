@@ -202,8 +202,20 @@ func _recalculate_mesh_max_y() -> void:
 			return
 
 
-func _clear_generated_collision() -> void:
-	var collision_body: CollisionObject3D = $ChunkCollision
+func _clear_generated_collision(
+	collision_body_override: CollisionObject3D = null
+) -> void:
+	# build_collision() temporarily removes ChunkCollision from this node before
+	# rebuilding its Jolt shape owners. Once detached, NodePath lookups such as
+	# $ChunkCollision no longer resolve, so use the already-held node reference.
+	var collision_body: CollisionObject3D = collision_body_override
+	if collision_body == null:
+		collision_body = get_node_or_null("ChunkCollision")
+
+	if collision_body == null:
+		collision_shape_owner_ids.clear()
+		return
+
 	var existing_owner_ids: PackedInt32Array = collision_body.get_shape_owners()
 
 	for owner_id in collision_shape_owner_ids:
@@ -211,7 +223,10 @@ func _clear_generated_collision() -> void:
 			collision_body.remove_shape_owner(owner_id)
 
 	collision_shape_owner_ids.clear()
-	$ChunkCollision/CollisionShape.shape = null
+
+	var placeholder := collision_body.get_node_or_null("CollisionShape") as CollisionShape3D
+	if placeholder != null:
+		placeholder.shape = null
 
 
 func _ready() -> void:
@@ -830,7 +845,7 @@ func build_collision() -> void:
 	if collision_was_in_tree and collision_parent != null:
 		collision_parent.remove_child(collision_body)
 
-	_clear_generated_collision()
+	_clear_generated_collision(collision_body)
 
 	if collision_boxes.is_empty():
 		collision_ready = true
