@@ -2495,8 +2495,12 @@ func can_player_enter_chunk(
 
 	# An older collision shape remains valid while a replacement is being
 	# prepared. Treat that as safe so remeshing cannot create a physics gap.
+	# A collision flag is only meaningful while the Chunk node is in the
+	# active SceneTree. Far chunks are intentionally data-only for streaming,
+	# so never let the player enter one based on stale collision state.
 	return (
-		chunk.is_generated
+		chunk.is_inside_tree()
+		and chunk.is_generated
 		and chunk.mesh_ready
 		and (
 			chunk.collision_ready
@@ -5053,6 +5057,18 @@ func process_collision_queue() -> void:
 
 		if not chunk.mesh_ready:
 			continue
+
+		# A stale collision queue entry can survive a render-region transition.
+		# Never build a collider for a data-only chunk, because collision_ready
+		# must never become true without an active StaticBody3D in the SceneTree.
+		if not chunk.is_inside_tree():
+			if (
+				render_regions == null
+				or not render_regions.is_chunk_batched(chunk_coord)
+			):
+				add_child(chunk)
+			else:
+				continue
 
 		if chunk.collision_ready:
 			continue
