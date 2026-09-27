@@ -394,13 +394,20 @@ func _water_block_for_amount(amount: int) -> int:
 
 func _water_schedule(
 	block_position: Vector3i,
-	delay_ticks: int = DEFAULT_WATER_TICK_DELAY
+	delay_ticks: int = -1
 ) -> void:
 	if block_position.y < 0 or block_position.y >= CHUNK_HEIGHT:
 		return
 
+	# An omitted delay uses the exported water tick delay. Explicit delays
+	# remain available for special cases such as frontier wakeups.
+	var effective_delay: int = (
+		water_tick_delay
+		if delay_ticks < 0
+		else delay_ticks
+	)
 	var scheduled_tick: int = (
-		game_tick + maxi(1, delay_ticks)
+		game_tick + maxi(1, effective_delay)
 	)
 
 	var previous_tick: int = int(
