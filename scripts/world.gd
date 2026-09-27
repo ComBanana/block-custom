@@ -138,6 +138,7 @@ var world_time_minutes: float = DEFAULT_TIME_MINUTES
 class GenerationResult:
 	var blocks: PackedByteArray
 	var chunk_coordinate: Vector2i
+	var generation_revision: int = 0
 	var terrain_ms: float = 0.0
 
 
@@ -236,6 +237,7 @@ var generation_queue: Array[Vector2i] = []
 var generation_queued: Dictionary = {}
 
 var generation_tasks: Dictionary = {}
+var generation_revisions: Dictionary = {}
 var mesh_tasks: Dictionary = {}
 
 var stream_direction := Vector2.ZERO
@@ -1960,6 +1962,7 @@ func _process(delta: float) -> void:
 		"loaded_chunks": loaded_chunks.size(),
 		"required_chunks": required_chunks.size(),
 		"generation_tasks": generation_tasks.size(),
+		"generation_revisions": generation_revisions.size(),
 		"mesh_tasks": mesh_tasks.size(),
 		"load_queue": load_queue.size(),
 		"chunk_load_tasks": chunk_load_tasks.size(),
@@ -3451,6 +3454,11 @@ func load_chunk(
 		enqueue_neighbor_meshes(chunk_coord)
 		return
 
+	var next_generation_revision: int = int(
+		generation_revisions.get(chunk_coord, 0)
+	) + 1
+	generation_revisions[chunk_coord] = next_generation_revision
+
 	if (
 		is_chunk_critical(chunk_coord)
 		or _is_chunk_teleport_required(chunk_coord)
@@ -3539,6 +3547,13 @@ func process_generation_queue() -> void:
 		var chunk_coord: Vector2i = (
 			result.chunk_coordinate
 		)
+
+		if result.generation_revision != int(
+			generation_revisions.get(chunk_coord, 0)
+		):
+			# This worker belongs to an older load instance of the coordinate.
+			# A recycled/reloaded chunk must never receive stale terrain data.
+			continue
 
 		var generated_data: PackedByteArray = (
 			result.blocks
@@ -3648,6 +3663,9 @@ func process_generation_queue() -> void:
 
 		result.chunk_coordinate = (
 			chunk_coord
+		)
+		result.generation_revision = int(
+			generation_revisions.get(chunk_coord, 0)
 		)
 
 
