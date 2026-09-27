@@ -799,23 +799,45 @@ func _is_horizontal_movement_path_ready(
 		sprint_speed * maxf(delta, 0.0) + 0.4
 	)
 
-	# Sample the path in quarter-block increments so a long frame cannot jump
-	# across an unready chunk without being checked.
+	# Sample the path in quarter-block increments and include the player's
+	# full horizontal footprint. This matters at exact chunk boundaries where
+	# the center point can be ready while one side of the player overlaps an
+	# unready chunk.
 	var sample_count: int = maxi(
 		1,
 		ceili(max_step_distance / 0.25)
 	)
+	var footprint_offsets: Array[Vector2] = [
+		Vector2(-0.4, -0.4),
+		Vector2(-0.4, 0.0),
+		Vector2(-0.4, 0.4),
+		Vector2(0.0, -0.4),
+		Vector2(0.0, 0.0),
+		Vector2(0.0, 0.4),
+		Vector2(0.4, -0.4),
+		Vector2(0.4, 0.0),
+		Vector2(0.4, 0.4)
+	]
 
 	for sample_index in range(1, sample_count + 1):
 		var fraction: float = float(sample_index) / float(sample_count)
-		var sample_position: Vector3 = (
+		var sample_center: Vector3 = (
 			global_position
 			+ horizontal_direction * max_step_distance * fraction
 		)
-		var sample_chunk: Vector2i = world.world_to_chunk(sample_position)
 
-		if not world.can_player_enter_chunk(sample_chunk):
-			return false
+		for footprint_offset: Vector2 in footprint_offsets:
+			var sample_position: Vector3 = sample_center + Vector3(
+				footprint_offset.x,
+				0.0,
+				footprint_offset.y
+			)
+			var sample_chunk: Vector2i = world.world_to_chunk(
+				sample_position
+			)
+
+			if not world.can_player_enter_chunk(sample_chunk):
+				return false
 
 	return true
 
