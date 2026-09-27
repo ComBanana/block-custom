@@ -171,6 +171,7 @@ class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
 	var water_only: bool = false
+	var player_priority: bool = false
 	var data_revision: int = 0
 	var water_data_revision: int = 0
 	var mesh_max_y_exclusive: int = CHUNK_HEIGHT
@@ -4856,7 +4857,7 @@ func process_pending_chunk_saves() -> void:
 			var loaded_chunk = loaded_chunks[chunk_coord]
 			if (
 				loaded_chunk.is_generated
-				and loaded_chunk.mesh_data_revision == saved_revision
+				and loaded_chunk.data_revision == saved_revision
 			):
 				dirty_chunks.erase(chunk_coord)
 
