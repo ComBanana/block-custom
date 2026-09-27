@@ -1512,11 +1512,17 @@ func _update_day_night(delta: float) -> void:
 
 	if sun_light != null:
 		sun_light.global_position = player.global_position + sun_offset
-		sun_light.look_at(player.global_position, Vector3.UP)
+		var sun_up := Vector3.UP
+		if absf(sun_offset.normalized().dot(Vector3.UP)) > 0.98:
+			sun_up = Vector3.FORWARD
+		sun_light.look_at(player.global_position, sun_up)
 
 	if moon_light != null:
 		moon_light.global_position = player.global_position + moon_offset
-		moon_light.look_at(player.global_position, Vector3.UP)
+		var moon_up := Vector3.UP
+		if absf(moon_offset.normalized().dot(Vector3.UP)) > 0.98:
+			moon_up = Vector3.FORWARD
+		moon_light.look_at(player.global_position, moon_up)
 
 	var daylight := clampf(
 		sin((time_hours - 6.0) / 12.0 * PI),
