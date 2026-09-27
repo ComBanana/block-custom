@@ -3062,7 +3062,7 @@ func process_load_queue() -> void:
 		):
 			break
 
-		var task_id: int = completed_tasks.pop_back()
+		var task_id: int = completed_tasks.pop_front()
 		var result: ChunkLoadResult = chunk_load_tasks[task_id]
 
 		var wait_error := WorkerThreadPool.wait_for_task_completion(
@@ -3084,9 +3084,17 @@ func process_load_queue() -> void:
 		if loaded_chunks.has(result.chunk_coordinate):
 			continue
 
+		# The player may have returned to a chunk while its unload save
+		# was still queued. Never let an older disk snapshot overwrite it.
+		var blocks_to_apply: PackedByteArray = result.saved_blocks
+		if pending_chunk_saves.has(result.chunk_coordinate):
+			blocks_to_apply = pending_chunk_saves[
+				result.chunk_coordinate
+			]
+
 		load_chunk(
 			result.chunk_coordinate,
-			result.saved_blocks
+			blocks_to_apply
 		)
 		applied_count += 1
 
