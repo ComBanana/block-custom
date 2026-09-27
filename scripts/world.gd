@@ -2486,9 +2486,8 @@ func can_player_enter_chunk(
 
 	var chunk = loaded_chunks[chunk_coord]
 
-	# collision_available means an older collision shape is still attached and
-	# usable while a replacement mesh is being prepared. Do not freeze or
-	# expose the player to a gap during that replacement window.
+	# An older collision shape remains valid while a replacement is being
+	# prepared. Treat that as safe so remeshing cannot create a physics gap.
 	return (
 		chunk.is_generated
 		and chunk.mesh_ready
@@ -2502,12 +2501,11 @@ func can_player_enter_chunk(
 func ensure_player_collision_ready(
 	world_position: Vector3
 ) -> bool:
-	# The collision queue is normally asynchronous, but the player must never
-	# enter a chunk whose first collider has not been installed yet. Repair the
-	# current chunk synchronously as a final safety net, then make the adjacent
-	# 3x3 neighborhood eligible for the normal queue.
+	# The collision queue is normally asynchronous. The chunk containing the
+	# player gets one synchronous repair attempt so physics cannot run through
+	# a newly-loaded chunk just because the queue is one frame behind.
 	var center_chunk := world_to_chunk(world_position)
-	var neighbor_offsets: Array[Vector2i] = [
+	var offsets: Array[Vector2i] = [
 		Vector2i.ZERO,
 		Vector2i(-1, 0),
 		Vector2i(1, 0),
@@ -2519,7 +2517,7 @@ func ensure_player_collision_ready(
 		Vector2i(1, 1)
 	]
 
-	for offset: Vector2i in neighbor_offsets:
+	for offset: Vector2i in offsets:
 		var chunk_coord := center_chunk + offset
 		if not loaded_chunks.has(chunk_coord):
 			continue
@@ -2535,15 +2533,12 @@ func ensure_player_collision_ready(
 			continue
 
 		if offset == Vector2i.ZERO:
-			# This is the chunk the player is physically occupying. Building its
-			# first collision shape here removes the queue/frame-order race.
 			chunk.build_collision()
 			return chunk.collision_ready or chunk.collision_available
 
 		enqueue_collision_chunk(chunk_coord)
 
-	return is_chunk_ready_for_player(center_chunk)
-
+	return can_player_enter_chunk(center_chunk)
 
 func get_chunk_stream_priority(
 	chunk_coord: Vector2i
