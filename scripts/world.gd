@@ -57,6 +57,8 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var loading_mesh_budget_ms: float = 8.0
 @export var startup_mesh_radius: int = 4
 @export var interactive_worker_reserve: int = 1
+@export var far_chunk_compression_distance: int = 10
+@export var far_chunk_compression_per_frame: int = 8
 
 
 @export_category("Streaming")
@@ -247,6 +249,9 @@ var chunk_data_cache_order: Array[Vector2i] = []
 var chunk_reuse_pool: Array[Chunk] = []
 var chunk_release_queue: Array[Chunk] = []
 var chunk_release_queued: Dictionary = {}
+
+var far_chunk_compression_queue: Array[Vector2i] = []
+var far_chunk_compression_queued: Dictionary = {}
 
 
 # ===================================================================
@@ -1983,6 +1988,13 @@ func _process(delta: float) -> void:
 			"world/process_render_regions",
 			float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
 		)
+
+	phase_start_usec = Time.get_ticks_usec()
+	process_far_chunk_compression()
+	PerformanceProfiler.record_phase(
+		"world/process_far_chunk_compression",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
 
 	phase_start_usec = Time.get_ticks_usec()
 	process_collision_queue()
@@ -4062,7 +4074,7 @@ func _capture_render_region_snapshot(
 		return {}
 
 	return {
-		"blocks": chunk.blocks.duplicate(),
+		"blocks": chunk.get_blocks_snapshot(),
 		"max_y_exclusive": chunk.mesh_max_y_exclusive,
 		"revision": chunk.mesh_data_revision
 	}
@@ -4155,6 +4167,49 @@ func enqueue_water_mesh_chunk(
 # Player edit queue
 # ===================================================================
 
+func process_far_chunk_compression() -> void:
+	var limit: int = maxi(1, far_chunk_compression_per_frame)
+	var processed: int = 0
+
+	while (
+		processed < limit
+		and not far_chunk_compression_queue.is_empty()
+	):
+		var chunk_coord: Vector2i = far_chunk_compression_queue.pop_front()
+		far_chunk_compression_queued.erase(chunk_coord)
+
+		if not loaded_chunks.has(chunk_coord):
+			processed += 1
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if (
+			not chunk.is_generated
+			or render_regions == null
+			or not render_regions.is_chunk_batched(chunk_coord)
+		):
+			processed += 1
+			continue
+
+		if (
+			dirty_chunks.has(chunk_coord)
+			or generated_cache_pending.has(chunk_coord)
+			or pending_chunk_saves.has(chunk_coord)
+		):
+			processed += 1
+			continue
+
+		if chunk.mesh_building:
+			far_chunk_compression_queue.append(chunk_coord)
+			far_chunk_compression_queued[chunk_coord] = true
+			processed += 1
+			continue
+
+		chunk.compress_blocks_for_far_storage()
+		processed += 1
+
+
 func enqueue_player_edit(
 	chunk_coord: Vector2i
 ) -> void:
@@ -4218,31 +4273,31 @@ func _capture_mesh_inputs(
 
 	# Duplicating the compact block arrays is cheap compared to walking
 	# the scene tree and doing thousands of cross-chunk lookups.
-	result.center_blocks = chunk.blocks.duplicate()
+	result.center_blocks = chunk.get_blocks_snapshot()
 
 	var neighbor_coord := chunk_coord + Vector2i(-1, 0)
 	if loaded_chunks.has(neighbor_coord):
 		var neighbor = loaded_chunks[neighbor_coord]
 		if neighbor.is_generated:
-			result.neg_x_blocks = neighbor.blocks.duplicate()
+			result.neg_x_blocks = neighbor.get_blocks_snapshot()
 
 	neighbor_coord = chunk_coord + Vector2i(1, 0)
 	if loaded_chunks.has(neighbor_coord):
 		var neighbor = loaded_chunks[neighbor_coord]
 		if neighbor.is_generated:
-			result.pos_x_blocks = neighbor.blocks.duplicate()
+			result.pos_x_blocks = neighbor.get_blocks_snapshot()
 
 	neighbor_coord = chunk_coord + Vector2i(0, -1)
 	if loaded_chunks.has(neighbor_coord):
 		var neighbor = loaded_chunks[neighbor_coord]
 		if neighbor.is_generated:
-			result.neg_z_blocks = neighbor.blocks.duplicate()
+			result.neg_z_blocks = neighbor.get_blocks_snapshot()
 
 	neighbor_coord = chunk_coord + Vector2i(0, 1)
 	if loaded_chunks.has(neighbor_coord):
 		var neighbor = loaded_chunks[neighbor_coord]
 		if neighbor.is_generated:
-			result.pos_z_blocks = neighbor.blocks.duplicate()
+			result.pos_z_blocks = neighbor.get_blocks_snapshot()
 
 	result.capture_ms = float(
 		Time.get_ticks_usec() - start_usec
@@ -4821,6 +4876,24 @@ func process_pending_chunk_saves() -> void:
 			):
 				dirty_chunks.erase(chunk_coord)
 
+		if (
+			loaded_chunks.has(chunk_coord)
+			and render_regions != null
+		):
+			var loaded_chunk_for_compression = loaded_chunks[chunk_coord]
+			var distance_from_player := max(
+				abs(chunk_coord.x - player_chunk.x),
+				abs(chunk_coord.y - player_chunk.y)
+			)
+			if (
+				loaded_chunk_for_compression.is_generated
+				and render_regions.is_chunk_batched(chunk_coord)
+				and distance_from_player >= far_chunk_compression_distance
+				and not far_chunk_compression_queued.has(chunk_coord)
+			):
+				far_chunk_compression_queue.append(chunk_coord)
+				far_chunk_compression_queued[chunk_coord] = true
+
 		saved_count += 1
 
 	if (
@@ -4882,7 +4955,7 @@ func unload_chunk(
 		if chunk.is_generated:
 			_queue_chunk_save(
 				chunk_coord,
-				chunk.blocks,
+				chunk.get_blocks_snapshot(),
 				chunk.mesh_data_revision
 			)
 		generated_cache_pending.erase(chunk_coord)
@@ -4902,7 +4975,7 @@ func unload_chunk(
 	if chunk.is_generated:
 		_cache_unloaded_chunk_data(
 			chunk_coord,
-			chunk.blocks
+			chunk.get_blocks_snapshot()
 		)
 
 	loaded_chunks.erase(
@@ -5193,7 +5266,7 @@ func save_world() -> void:
 
 		_queue_chunk_save(
 			chunk_coord,
-			chunk.blocks,
+			chunk.get_blocks_snapshot(),
 			chunk.mesh_data_revision
 		)
 
@@ -5564,11 +5637,13 @@ func try_start_gameplay() -> void:
 	if not loaded_chunks.has(player_chunk):
 		return
 
-	if not _loading_collision_ready():
+	var spawn_chunk = loaded_chunks.get(player_chunk, null)
+	if spawn_chunk == null:
 		return
 
-	var spawn_chunk = loaded_chunks[player_chunk]
-	if not spawn_chunk.mesh_ready:
+	# Only the player's own chunk must be fully collidable before input is
+	# unlocked. Neighboring collision builds continue without freezing input.
+	if not spawn_chunk.mesh_ready or not spawn_chunk.collision_available:
 		return
 
 	startup_rendering = false
