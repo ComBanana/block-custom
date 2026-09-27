@@ -800,6 +800,10 @@ func build_collision() -> void:
 
 	var collision_shape := ConcavePolygonShape3D.new()
 	collision_shape.set_faces(collision_faces)
+	# Generated voxel faces can meet at chunk boundaries and may have
+	# inconsistent winding. Enable two-sided collision so a valid terrain
+	# triangle cannot disappear simply because its winding points inward.
+	collision_shape.backface_collision = true
 	$ChunkCollision/CollisionShape.shape = collision_shape
 
 	# ConcavePolygonShape3D owns the collision geometry after set_faces().
