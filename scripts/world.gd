@@ -74,6 +74,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var gameplay_mesh_refill_per_frame: int = 3
 @export var collisions_per_frame: int = 2
 @export var critical_chunk_distance: int = 3
+@export var block_updates_per_tick: int = 2
 @export var max_cached_chunk_data: int = 256
 @export var chunk_release_per_frame: int = 8
 @export var chunk_release_budget_ms: float = 0.8
@@ -157,6 +158,7 @@ class ChunkLoadResult:
 class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
+	var water_only: bool = false
 	var data_revision: int = 0
 	var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 	var capture_ms: float = 0.0
@@ -458,6 +460,25 @@ func _water_mark_mesh_dirty(
 		] = true
 
 
+func _water_invalidate_cache_around(
+	block_position: Vector3i
+) -> void:
+	# A water mutation only changes the answer for this voxel and its six
+	# directly adjacent neighbors. Keep the rest of the tick cache intact.
+	var offsets: Array[Vector3i] = [
+		Vector3i.ZERO,
+		Vector3i(0, -1, 0),
+		Vector3i(0, 1, 0),
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for offset: Vector3i in offsets:
+		water_block_cache.erase(block_position + offset)
+
+
 func _water_set_quiet(
 	block_position: Vector3i,
 	block_id: int
@@ -480,7 +501,7 @@ func _water_set_quiet(
 		false
 	)
 
-	water_block_cache.erase(block_position)
+	_water_invalidate_cache_around(block_position)
 
 	if _water_get(block_position) != block_id:
 		return false
@@ -509,8 +530,8 @@ func _water_set(
 		false
 	)
 
-	# The cached block state is now stale because this block_position changed.
-	water_block_cache.clear()
+	# The cached block state and its directly affected neighbors are stale.
+	_water_invalidate_cache_around(block_position)
 
 	# A failed write means the destination chunk is not currently loaded.
 	if _water_get(block_position) != block_id:
@@ -1214,13 +1235,17 @@ var startup_rendering: bool = false
 var world_name: String = "World"
 var world_seed: int = 12345
 var world_metadata: Dictionary = {}
+var saved_player_state: Dictionary = {}
 var dirty_chunks: Dictionary = {}
+signal saving_progress(completed: int, total: int)
+var exit_save_in_progress: bool = false
 # Newly generated chunks are cached separately from edit dirtiness so
 # periodic autosaves do not write the entire render distance at once.
 var generated_cache_pending: Dictionary = {}
 var pending_chunk_save_queue: Array[Vector2i] = []
 var pending_chunk_save_head: int = 0
 var pending_chunk_saves: Dictionary = {}
+var pending_chunk_save_revisions: Dictionary = {}
 var save_accumulator: float = 0.0
 const SAVE_INTERVAL: float = 15.0
 
@@ -1293,6 +1318,11 @@ func _ready() -> void:
 		player.camera.rotation.x = float(
 			world_metadata.get("player_pitch", 0.0)
 		)
+
+	if world_metadata.get("player_state") is Dictionary:
+		saved_player_state = world_metadata[
+			"player_state"
+		]
 
 	terrain_noise.seed = world_seed
 	terrain_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -2000,8 +2030,15 @@ func queue_player_block_update(
 func process_block_update_tick() -> void:
 	var tick_queue_end: int = pending_block_updates.size()
 	var processed: int = 0
+	var limit: int = maxi(
+		1,
+		block_updates_per_tick
+	)
 
-	while processed < tick_queue_end:
+	while (
+		processed < tick_queue_end
+		and processed < limit
+	):
 		if pending_block_updates.is_empty():
 			return
 
@@ -2436,8 +2473,7 @@ func is_chunk_ready_for_player(
 
 	return (
 		chunk.is_generated
-		and chunk.mesh_ready
-		and chunk.collision_ready
+		and chunk.collision_available
 	)
 
 
@@ -4065,8 +4101,10 @@ func enqueue_player_edit(
 	if chunk.mesh_building:
 		chunk.cancel_mesh_build()
 
-	# Old mesh no longer represents the block data.
-	chunk.mesh_ready = false
+	# Keep the current visual mesh visible while the replacement is built.
+	# The old collision shape also remains available until the replacement
+	# collision is ready.
+	chunk.collision_ready = false
 
 	# Remove its logical queue state.
 	near_mesh_queued.erase(
@@ -4145,7 +4183,9 @@ func _build_mesh_worker(
 		result.neg_z_blocks,
 		result.pos_z_blocks,
 		result.chunk_coordinate,
-		result.mesh_max_y_exclusive
+		result.mesh_max_y_exclusive,
+		not result.water_only,
+		result.water_only
 	)
 	result.mesh_ms = float(
 		Time.get_ticks_usec() - start_usec
@@ -4273,15 +4313,34 @@ func process_mesh_queue() -> void:
 		# snapshot over newer block data; immediately schedule a fresh build.
 		if chunk.mesh_data_revision != result.data_revision:
 			chunk.mesh_building = false
-			chunk.mesh_ready = false
-			chunk.collision_ready = false
-			chunk.set_generation_stage(Chunk.GenerationStage.MESH_QUEUED)
+			# Keep any previous visual mesh/collision usable. A stale water
+			# result only needs another water build; a solid result needs a
+			# complete rebuild and collision refresh.
+			if not result.water_only:
+				chunk.mesh_ready = false
+				chunk.collision_ready = false
+				chunk.set_generation_stage(
+					Chunk.GenerationStage.MESH_QUEUED
+				)
+				enqueue_mesh_chunk(
+					result.chunk_coordinate
+				)
+			else:
+				enqueue_water_mesh_chunk(
+					result.chunk_coordinate
+				)
 			chunk.mesh_rebuild_requested = false
 			chunk.water_mesh_rebuild_requested = false
-			enqueue_mesh_chunk(result.chunk_coordinate)
 			continue
 
-		chunk.apply_mesh_buffer(result.buffer)
+		if result.water_only:
+			chunk.apply_water_mesh(
+				result.buffer.water
+			)
+		else:
+			chunk.apply_mesh_buffer(
+				result.buffer
+			)
 
 		if chunk.mesh_rebuild_requested:
 			chunk.mesh_rebuild_requested = false
@@ -4295,9 +4354,12 @@ func process_mesh_queue() -> void:
 			"mesh_apply",
 			float(Time.get_ticks_usec() - mesh_apply_start_usec) / 1000.0
 		)
-		enqueue_collision_chunk(
-			result.chunk_coordinate
-		)
+
+		if not result.water_only:
+			enqueue_collision_chunk(
+				result.chunk_coordinate
+			)
+
 		applied_count += 1
 
 	# ---------------------------------------------------------------
@@ -4346,8 +4408,8 @@ func process_mesh_queue() -> void:
 			continue
 
 		chunk.mesh_building = true
-		chunk.mesh_ready = false
-		chunk.collision_ready = false
+		# Existing meshes/collision remain visible/usable until the worker result
+		# is applied. Newly created chunks already have these flags false.
 		chunk.mesh_job_id += 1
 
 		var result := MeshResult.new()
@@ -4368,6 +4430,10 @@ func process_mesh_queue() -> void:
 			)
 		)
 
+		result.water_only = (
+			active_mesh_priority == PRIORITY_WATER
+		)
+
 		var task_id: int = WorkerThreadPool.add_task(
 			mesh_callable,
 			(
@@ -4382,7 +4448,6 @@ func process_mesh_queue() -> void:
 			]
 		)
 
-		result.job_id = chunk.mesh_job_id
 		mesh_tasks[task_id] = result
 
 		if active_mesh_priority == PRIORITY_PLAYER:
@@ -4604,7 +4669,8 @@ func process_collision_queue() -> void:
 
 func _queue_chunk_save(
 	chunk_coord: Vector2i,
-	blocks: PackedByteArray
+	blocks: PackedByteArray,
+	data_revision: int = -1
 ) -> void:
 	var snapshot: PackedByteArray = blocks.duplicate()
 	chunk_save_revisions[chunk_coord] = int(
@@ -4612,9 +4678,13 @@ func _queue_chunk_save(
 	) + 1
 	if pending_chunk_saves.has(chunk_coord):
 		pending_chunk_saves[chunk_coord] = snapshot
+		if data_revision >= 0:
+			pending_chunk_save_revisions[chunk_coord] = data_revision
 		return
 
 	pending_chunk_saves[chunk_coord] = snapshot
+	if data_revision >= 0:
+		pending_chunk_save_revisions[chunk_coord] = data_revision
 	pending_chunk_save_queue.append(chunk_coord)
 
 
@@ -4654,6 +4724,26 @@ func process_pending_chunk_saves() -> void:
 
 		pending_chunk_saves.erase(chunk_coord)
 		generated_cache_pending.erase(chunk_coord)
+
+		var saved_revision: int = int(
+			pending_chunk_save_revisions.get(
+				chunk_coord,
+				-1
+			)
+		)
+		pending_chunk_save_revisions.erase(chunk_coord)
+
+		if (
+			saved_revision >= 0
+			and loaded_chunks.has(chunk_coord)
+		):
+			var loaded_chunk = loaded_chunks[chunk_coord]
+			if (
+				loaded_chunk.is_generated
+				and loaded_chunk.mesh_data_revision == saved_revision
+			):
+				dirty_chunks.erase(chunk_coord)
+
 		saved_count += 1
 
 	if (
@@ -4682,7 +4772,10 @@ func _flush_pending_chunk_saves() -> void:
 			pending_chunk_saves[chunk_coord]
 		)
 		pending_chunk_saves.erase(chunk_coord)
+		pending_chunk_save_revisions.erase(chunk_coord)
 		generated_cache_pending.erase(chunk_coord)
+		if loaded_chunks.has(chunk_coord):
+			dirty_chunks.erase(chunk_coord)
 
 	pending_chunk_save_queue.clear()
 	pending_chunk_save_head = 0
@@ -4712,7 +4805,8 @@ func unload_chunk(
 		if chunk.is_generated:
 			_queue_chunk_save(
 				chunk_coord,
-				chunk.blocks
+				chunk.blocks,
+				chunk.mesh_data_revision
 			)
 		generated_cache_pending.erase(chunk_coord)
 		dirty_chunks.erase(chunk_coord)
@@ -4980,31 +5074,7 @@ func get_statistics() -> Dictionary:
 	}
 
 
-func save_world() -> void:
-	if world_name == "":
-		return
-
-	for chunk_coord in dirty_chunks:
-		if not loaded_chunks.has(chunk_coord):
-			continue
-
-		var chunk = loaded_chunks[chunk_coord]
-
-		if not chunk.is_generated:
-			continue
-
-		pending_chunk_saves.erase(chunk_coord)
-
-		WorldStore.save_chunk(
-			world_name,
-			chunk_coord,
-			chunk.blocks
-		)
-		generated_cache_pending.erase(chunk_coord)
-		dirty_chunks.erase(chunk_coord)
-
-	dirty_chunks.clear()
-
+func _update_world_metadata() -> void:
 	world_metadata["seed"] = world_seed
 	world_metadata["blocks_broken"] = blocks_broken
 	world_metadata["blocks_placed"] = blocks_placed
@@ -5018,12 +5088,169 @@ func save_world() -> void:
 		world_metadata["player_z"] = player.global_position.z
 		world_metadata["player_yaw"] = player.rotation.y
 		world_metadata["player_pitch"] = player.camera.rotation.x
+		world_metadata["player_state"] = player.get_persistent_state()
 
+
+func save_world() -> void:
+	if world_name == "":
+		return
+
+	# Queue dirty and newly generated chunks instead of writing them all on
+	# the calling frame. The persistence worker drains these incrementally.
+	var save_candidates: Dictionary = {}
+
+	for chunk_coord in dirty_chunks:
+		save_candidates[chunk_coord] = true
+
+	for chunk_coord in generated_cache_pending:
+		save_candidates[chunk_coord] = true
+
+	for chunk_coord in save_candidates:
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if not chunk.is_generated:
+			continue
+
+		_queue_chunk_save(
+			chunk_coord,
+			chunk.blocks,
+			chunk.mesh_data_revision
+		)
+
+	_update_world_metadata()
 	WorldStore.save_metadata(
 		world_name,
 		world_metadata
 	)
 
+
+func save_before_exit() -> void:
+	if exit_save_in_progress:
+		return
+
+	exit_save_in_progress = true
+
+	# Build the final persistence queue while gameplay is paused.
+	save_world()
+
+	var save_coordinates: Array[Vector2i] = []
+	for chunk_coord in pending_chunk_saves:
+		save_coordinates.append(chunk_coord)
+
+	var total: int = save_coordinates.size()
+	var completed: int = 0
+	saving_progress.emit(completed, total)
+
+	var cursor: int = 0
+
+	while cursor < save_coordinates.size():
+		var frame_start_usec: int = Time.get_ticks_usec()
+		var frame_saved: int = 0
+		var frame_limit: int = 64
+
+		while cursor < save_coordinates.size():
+			if (
+				frame_saved > 0
+				and frame_saved >= frame_limit
+			):
+				break
+
+			var elapsed_ms: float = float(
+				Time.get_ticks_usec() - frame_start_usec
+			) / 1000.0
+
+			if frame_saved > 0 and elapsed_ms >= 6.0:
+				break
+
+			var chunk_coord: Vector2i = save_coordinates[cursor]
+			cursor += 1
+
+			if not pending_chunk_saves.has(chunk_coord):
+				continue
+
+			WorldStore.save_chunk(
+				world_name,
+				chunk_coord,
+				pending_chunk_saves[chunk_coord]
+			)
+
+			pending_chunk_saves.erase(chunk_coord)
+			pending_chunk_save_revisions.erase(chunk_coord)
+			generated_cache_pending.erase(chunk_coord)
+
+			if loaded_chunks.has(chunk_coord):
+				dirty_chunks.erase(chunk_coord)
+
+			completed += 1
+			frame_saved += 1
+
+		saving_progress.emit(completed, total)
+
+		if cursor < save_coordinates.size():
+			# process_always=true keeps the timer active while the game
+			# is paused behind the saving screen.
+			await get_tree().create_timer(
+				0.0,
+				true
+			).timeout
+
+	pending_chunk_save_queue.clear()
+	pending_chunk_save_head = 0
+	pending_chunk_saves.clear()
+	pending_chunk_save_revisions.clear()
+	dirty_chunks.clear()
+
+	_update_world_metadata()
+	WorldStore.save_metadata(
+		world_name,
+		world_metadata
+	)
+
+	saving_progress.emit(total, total)
+	exit_save_in_progress = false
+
+
+func finish_exit_cleanup() -> void:
+	# Keep the saving screen visible while worker tasks finish.
+	while (
+		not generation_tasks.is_empty()
+		or not mesh_tasks.is_empty()
+		or not chunk_load_tasks.is_empty()
+	):
+		var completed_any: bool = false
+
+		for task_id in chunk_load_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				chunk_load_tasks.erase(task_id)
+				completed_any = true
+
+		for task_id in generation_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				generation_tasks.erase(task_id)
+				completed_any = true
+
+		for task_id in mesh_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				mesh_tasks.erase(task_id)
+				completed_any = true
+
+		if not completed_any:
+			await get_tree().create_timer(
+				0.0,
+				true
+			).timeout
+
+	chunk_load_tasks_by_coord.clear()
+
+	if render_regions != null:
+		render_regions.shutdown()
+		render_regions = null
 
 # ===================================================================
 # Loading screen / spawn
@@ -5264,6 +5491,14 @@ func try_start_gameplay() -> void:
 	startup_rendering = false
 	player_spawned = true
 
+	# Restore the saved pose only after nearby collision has been built.
+	# This prevents a saved crawl from briefly becoming a standing hitbox
+	# against unloaded/incomplete terrain.
+	if not saved_player_state.is_empty():
+		player.apply_persistent_state(
+			saved_player_state
+		)
+
 	player.set_physics_process(true)
 
 	last_player_position = player.global_position
@@ -5311,27 +5546,20 @@ func try_start_gameplay() -> void:
 	print(generation_profiler.get_summary())
 
 
-func _save_all_loaded_generated_chunks() -> void:
-	# Persist the generated world cache even when the player never edited
-	# anything. This is intentionally aggressive: subsequent launches can
-	# load voxel data directly instead of regenerating terrain.
-	for chunk_coord in loaded_chunks:
-		var chunk = loaded_chunks[chunk_coord]
-		if not chunk.is_generated:
-			continue
+func _exit_tree() -> void:
 
-		pending_chunk_saves.erase(chunk_coord)
-
-		WorldStore.save_chunk(
+	# Normal exits use save_before_exit(), so no large blocking save belongs
+	# here. Keep this callback lightweight as a final metadata update.
+	if world_name != "" and not exit_save_in_progress:
+		_update_world_metadata()
+		WorldStore.save_metadata(
 			world_name,
-			chunk_coord,
-			chunk.blocks
+			world_metadata
 		)
 
-	dirty_chunks.clear()
-
-
-func _exit_tree() -> void:
+	PerformanceProfiler.finish_session({
+		"generation_profile": generation_profiler.get_snapshot()
+	})
 
 	for chunk in chunk_release_queue:
 		if is_instance_valid(chunk):
@@ -5349,44 +5577,11 @@ func _exit_tree() -> void:
 	chunk_load_tasks.clear()
 	chunk_load_tasks_by_coord.clear()
 
-	PerformanceProfiler.finish_session({
-		"generation_profile": generation_profiler.get_snapshot()
-	})
-
-	save_world()
-	_save_all_loaded_generated_chunks()
-	_flush_pending_chunk_saves()
-
-	if render_regions != null:
-		render_regions.shutdown()
-		render_regions = null
-
 	for task_id in generation_tasks:
-		var wait_error: Error = (
-			WorkerThreadPool.wait_for_task_completion(
-				task_id
-			)
-		)
-
-		if wait_error != OK:
-			push_warning(
-				"Chunk generation task shutdown error: "
-				+ str(wait_error)
-			)
-
+		WorkerThreadPool.wait_for_task_completion(task_id)
 	generation_tasks.clear()
 
 	for task_id in mesh_tasks:
-		var wait_error: Error = (
-			WorkerThreadPool.wait_for_task_completion(
-				task_id
-			)
-		)
-
-		if wait_error != OK:
-			push_warning(
-				"Chunk mesh task shutdown error: "
-				+ str(wait_error)
-			)
-
+		WorkerThreadPool.wait_for_task_completion(task_id)
 	mesh_tasks.clear()
+
