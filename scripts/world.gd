@@ -2554,9 +2554,18 @@ func ensure_player_collision_ready(
 			if chunk.collision_ready or chunk.collision_available:
 				continue
 
-			# Collision shape changes are kept out of CharacterBody3D's physics
-			# callback. Queue the current chunk and let World._process() install
-			# its primitive shapes before the next physics step.
+			if offset == Vector2i.ZERO:
+				# The player is about to simulate against this chunk right now.
+				# Build its first collider synchronously so there is no
+				# idle/physics ordering window where the player can step into
+				# empty physics space. Only the current chunk uses this path;
+				# surrounding chunks remain queued to keep physics cheap.
+				chunk.build_collision()
+				if chunk.collision_ready or chunk.collision_available:
+					continue
+				return false
+
+			# Neighboring collision can safely stay on the normal World queue.
 			enqueue_collision_chunk(chunk_coord)
 
 	return can_player_enter_chunk(center_chunk)
