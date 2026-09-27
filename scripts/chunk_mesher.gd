@@ -377,14 +377,117 @@ static func _is_solid_block(block_id: int) -> bool:
 	return block_id != AIR and not is_water(block_id)
 
 
-static func _build_collision_boxes(
+static func _build_column_collision_boxes(
+	snapshot: PackedByteArray,
+	max_y_exclusive: int,
+	buffer: MeshBuffer
+) -> bool:
+	# The generated BlockCraft terrain is normally column-filled from Y=0
+	# upward. Detect that common case and reduce collision generation to a
+	# 16x16 height scan followed by a cheap 2D rectangle merge.
+	#
+	# This remains exact: if any column contains a solid voxel after an air or
+	# water gap, the fast path declines and the general 3D greedy path handles
+	# the edited/complex column instead.
+	var heights := PackedInt32Array()
+	heights.resize(CHUNK_SIZE * CHUNK_SIZE)
+	heights.fill(0)
+
+	for z in range(CHUNK_SIZE):
+		for x in range(CHUNK_SIZE):
+			var top: int = 0
+			var gap_seen: bool = false
+
+			for y in range(max_y_exclusive):
+				var block_id: int = snapshot[
+					padded_index(x, y, z)
+				]
+
+				if _is_solid_block(block_id):
+					if gap_seen:
+						return false
+
+					top = y + 1
+				else:
+					gap_seen = true
+
+			heights[
+				x + z * CHUNK_SIZE
+			] = top
+
+	# Merge adjacent columns with the same top height into larger boxes.
+	var used := PackedByteArray()
+	used.resize(CHUNK_SIZE * CHUNK_SIZE)
+	used.fill(0)
+
+	for z in range(CHUNK_SIZE):
+		for x in range(CHUNK_SIZE):
+			var column_index := x + z * CHUNK_SIZE
+			if used[column_index] != 0:
+				continue
+
+			var height: int = heights[column_index]
+			if height <= 0:
+				used[column_index] = 1
+				continue
+
+			var width: int = 1
+			while x + width < CHUNK_SIZE:
+				var test_index := x + width + z * CHUNK_SIZE
+				if used[test_index] != 0 or heights[test_index] != height:
+					break
+				width += 1
+
+			var depth: int = 1
+			while z + depth < CHUNK_SIZE:
+				var fits_depth := true
+				for dx in range(width):
+					var test_index := (
+						x + dx
+						+ (z + depth) * CHUNK_SIZE
+					)
+					if (
+						used[test_index] != 0
+						or heights[test_index] != height
+					):
+						fits_depth = false
+						break
+
+				if not fits_depth:
+					break
+				depth += 1
+
+			for dz in range(depth):
+				for dx in range(width):
+					used[
+						x + dx
+						+ (z + dz) * CHUNK_SIZE
+					] = 1
+
+			var size := Vector3(
+				float(width),
+				float(height),
+				float(depth)
+			)
+			var center := Vector3(
+				float(x) + size.x * 0.5,
+				float(height) * 0.5,
+				float(z) + size.z * 0.5
+			)
+
+			buffer.collision_boxes.append(center)
+			buffer.collision_boxes.append(size)
+
+	return true
+
+
+static func _build_collision_boxes_greedy(
 	snapshot: PackedByteArray,
 	max_y_exclusive: int,
 	buffer: MeshBuffer
 ) -> void:
-	# Exact 3D greedy decomposition of solid voxels into AABBs.
-	# The generated terrain is column-filled, but this also remains correct
-	# when player edits punch holes or create enclosed solid sections.
+	# Exact 3D greedy decomposition for columns containing arbitrary voxel
+	# edits, caves, holes, or overhangs.
 	var used := PackedByteArray()
 	used.resize(CHUNK_VOLUME)
 	used.fill(0)
@@ -499,6 +602,28 @@ static func _build_collision_boxes(
 
 				buffer.collision_boxes.append(center)
 				buffer.collision_boxes.append(size)
+
+
+static func _build_collision_boxes(
+	snapshot: PackedByteArray,
+	max_y_exclusive: int,
+	buffer: MeshBuffer
+) -> void:
+	if _build_column_collision_boxes(
+		snapshot,
+		max_y_exclusive,
+		buffer
+	):
+		return
+
+	# Player edits can make a chunk no longer representable as one solid
+	# column per X/Z coordinate. Fall back to the general exact decomposition
+	# in that case so arbitrary voxel modifications remain collision-correct.
+	_build_collision_boxes_greedy(
+		snapshot,
+		max_y_exclusive,
+		buffer
+	)
 
 
 static func build(
