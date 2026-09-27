@@ -783,9 +783,14 @@ func _add_mesh_surface(
 func clear_visual_meshes() -> void:
 	$ChunkMesh.mesh = null
 	$WaterMesh.mesh = null
+	# Batched far chunks are outside the gameplay collision radius, so remove
+	# their primitive collider as well. This keeps collision state truthful and
+	# prevents an old chunk collider from surviving a region transition.
+	_clear_generated_collision()
 	collision_boxes = PackedVector3Array()
 	mesh_ready = false
 	collision_ready = false
+	collision_available = false
 
 	if is_generated:
 		set_generation_stage(GenerationStage.TERRAIN_READY)
