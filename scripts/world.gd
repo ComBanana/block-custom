@@ -3078,6 +3078,11 @@ func process_load_queue() -> void:
 			)
 			continue
 
+		PerformanceProfiler.record_phase(
+			"streaming/chunk_disk_read",
+			result.load_ms
+		)
+
 		if not _is_chunk_needed(result.chunk_coordinate):
 			continue
 
@@ -3092,9 +3097,16 @@ func process_load_queue() -> void:
 				result.chunk_coordinate
 			]
 
+		var chunk_apply_start_usec := Time.get_ticks_usec()
 		load_chunk(
 			result.chunk_coordinate,
 			blocks_to_apply
+		)
+		PerformanceProfiler.record_phase(
+			"streaming/chunk_apply",
+			float(
+				Time.get_ticks_usec() - chunk_apply_start_usec
+			) / 1000.0
 		)
 		applied_count += 1
 
