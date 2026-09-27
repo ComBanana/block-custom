@@ -111,6 +111,7 @@ func reset_for_reuse() -> void:
 	compressed_blocks = PackedByteArray()
 	blocks_compressed = false
 	chunk_coordinate = Vector2i.ZERO
+	world = null
 
 	generation_passes_done = false
 	mesh_ready = false
