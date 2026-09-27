@@ -2532,10 +2532,9 @@ func ensure_player_collision_ready(
 		if chunk.collision_ready or chunk.collision_available:
 			continue
 
-		if offset == Vector2i.ZERO:
-			chunk.build_collision()
-			return chunk.collision_ready or chunk.collision_available
-
+		# Collision shape changes are kept out of CharacterBody3D's physics
+		# callback. Queue the current chunk and let World._process() install its
+		# primitive shapes before the next physics step.
 		enqueue_collision_chunk(chunk_coord)
 
 	return can_player_enter_chunk(center_chunk)
