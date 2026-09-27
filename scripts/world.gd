@@ -4272,6 +4272,26 @@ func _build_mesh_worker(
 	) / 1000.0
 
 
+func _mesh_result_priority(result: MeshResult) -> int:
+	if result.player_priority:
+		return 0
+
+	if not result.water_only and is_chunk_critical(
+		result.chunk_coordinate
+	):
+		return 1
+
+	if not result.water_only and get_chunk_stream_priority(
+		result.chunk_coordinate
+	) == 1:
+		return 2
+
+	if result.water_only:
+		return 3
+
+	return 4
+
+
 func _compare_completed_mesh_tasks(
 	first_id: int,
 	second_id: int
@@ -4285,10 +4305,16 @@ func _compare_completed_mesh_tasks(
 	var first_result: MeshResult = mesh_tasks[first_id]
 	var second_result: MeshResult = mesh_tasks[second_id]
 
-	var first_score := _chunk_stream_score(
+	var first_priority: int = _mesh_result_priority(first_result)
+	var second_priority: int = _mesh_result_priority(second_result)
+
+	if first_priority != second_priority:
+		return first_priority < second_priority
+
+	var first_score: float = _chunk_stream_score(
 		first_result.chunk_coordinate
 	)
-	var second_score := _chunk_stream_score(
+	var second_score: float = _chunk_stream_score(
 		second_result.chunk_coordinate
 	)
 
@@ -4313,7 +4339,8 @@ func process_mesh_queue() -> void:
 	var apply_start_usec: int = Time.get_ticks_usec()
 	var applied_count: int = 0
 
-	if not player_spawned and completed_tasks.size() > 1:
+	if completed_tasks.size() > 1:
+		# Apply player edits and terrain before fluid-only results.
 		completed_tasks.sort_custom(
 			_compare_completed_mesh_tasks
 		)
@@ -4518,6 +4545,9 @@ func process_mesh_queue() -> void:
 
 		result.water_only = (
 			active_mesh_priority == PRIORITY_WATER
+		)
+		result.player_priority = (
+			active_mesh_priority == PRIORITY_PLAYER
 		)
 
 		var task_id: int = WorkerThreadPool.add_task(
@@ -5087,13 +5117,23 @@ func set_block_world(
 		block_id
 	)
 
-	if render_regions != null:
+	# Only batched chunks need a render-region invalidation for a fluid voxel
+	# change. Near chunks have their own water mesh and will be refreshed by the
+	# water mesh queue.
+	var old_is_water: bool = _is_water(old_block_id)
+	var new_is_water: bool = _is_water(block_id)
+	if (
+		render_regions != null
+		and (
+			not old_is_water
+			or not new_is_water
+			or render_regions.is_chunk_batched(chunk_coord)
+		)
+	):
 		render_regions.mark_chunk_dirty(chunk_coord)
 
 	# Solid terrain and fluid geometry have independent revisions. Pure fluid
 	# changes therefore do not invalidate in-progress terrain mesh workers.
-	var old_is_water: bool = _is_water(old_block_id)
-	var new_is_water: bool = _is_water(block_id)
 	var old_is_solid: bool = old_block_id != AIR and not old_is_water
 	var new_is_solid: bool = block_id != AIR and not new_is_water
 
