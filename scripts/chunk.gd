@@ -810,20 +810,31 @@ func build_collision() -> void:
 	if not mesh_ready:
 		return
 
-	if not is_inside_tree():
-		return
+	var collision_body: CollisionObject3D = $ChunkCollision
+	var collision_parent: Node = collision_body.get_parent()
+	var collision_was_in_tree: bool = collision_body.is_inside_tree()
 
-	# Never retain the old collision set while rebuilding. This function is
-	# called from World._process(), outside the CharacterBody3D physics step.
+	# Godot 4.7's Jolt integration is substantially more expensive when a
+	# multi-shape StaticBody3D is modified after it has entered the scene tree:
+	# each shape change can trigger compound/broadphase work. Build the complete
+	# shape set while the body is out of the tree, then attach it once.
+	#
+	# This is still called from World._process(), never from the CharacterBody3D
+	# physics callback. The body is detached only for this synchronous rebuild.
+	if collision_was_in_tree and collision_parent != null:
+		collision_parent.remove_child(collision_body)
+
 	_clear_generated_collision()
 
 	if collision_boxes.is_empty():
 		collision_ready = true
 		collision_available = true
-		set_generation_stage(GenerationStage.READY)
-		return
+		set_generation_stage(GenerationStage.READY
 
-	var collision_body: CollisionObject3D = $ChunkCollision
+)
+		if collision_was_in_tree and collision_parent != null:
+			collision_parent.add_child(collision_body)
+		return
 
 	# Each owner carries one BoxShape3D and its local transform. Shape owners
 	# avoid creating hundreds of CollisionShape3D scene nodes per chunk.
@@ -856,6 +867,12 @@ func build_collision() -> void:
 	collision_ready = true
 	collision_available = true
 	set_generation_stage(GenerationStage.READY)
+
+	# Re-enter the scene tree only after every shape is installed. Jolt can then
+	# build the final static compound once instead of rebuilding it for every
+	# individual box addition.
+	if collision_was_in_tree and collision_parent != null:
+		collision_parent.add_child(collision_body)
 
 
 func get_block_for_mesh(
