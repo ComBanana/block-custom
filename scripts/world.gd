@@ -145,6 +145,7 @@ class ChunkLoadResult:
 	var chunk_coordinate: Vector2i
 	var chunk_path: String = ""
 	var saved_blocks: PackedByteArray
+	var save_revision: int = 0
 	var load_ms: float = 0.0
 
 
@@ -206,6 +207,7 @@ var load_queued: Dictionary = {}
 # thread on FileAccess operations. Results are applied by process_load_queue().
 var chunk_load_tasks: Dictionary = {}
 var chunk_load_tasks_by_coord: Dictionary = {}
+var chunk_save_revisions: Dictionary = {}
 
 
 # ===================================================================
@@ -3089,6 +3091,20 @@ func process_load_queue() -> void:
 		if loaded_chunks.has(result.chunk_coordinate):
 			continue
 
+		# An unload save may have been flushed after this worker started.
+		# If no pending in-memory snapshot remains, retry the disk read
+		# asynchronously instead of applying an older snapshot.
+		if (
+			not pending_chunk_saves.has(result.chunk_coordinate)
+			and result.save_revision != int(
+				chunk_save_revisions.get(result.chunk_coordinate, 0)
+			)
+		):
+			if not load_queued.has(result.chunk_coordinate):
+				load_queue.push_front(result.chunk_coordinate)
+				load_queued[result.chunk_coordinate] = true
+			continue
+
 		# The player may have returned to a chunk while its unload save
 		# was still queued. Never let an older disk snapshot overwrite it.
 		var blocks_to_apply: PackedByteArray = result.saved_blocks
@@ -3156,6 +3172,9 @@ func process_load_queue() -> void:
 
 		var result := ChunkLoadResult.new()
 		result.chunk_coordinate = chunk_coord
+		result.save_revision = int(
+			chunk_save_revisions.get(chunk_coord, 0)
+		)
 		result.chunk_path = WorldStore.chunk_path(
 			world_name,
 			chunk_coord
@@ -4435,6 +4454,9 @@ func _queue_chunk_save(
 	blocks: PackedByteArray
 ) -> void:
 	var snapshot: PackedByteArray = blocks.duplicate()
+	chunk_save_revisions[chunk_coord] = int(
+		chunk_save_revisions.get(chunk_coord, 0)
+	) + 1
 	if pending_chunk_saves.has(chunk_coord):
 		pending_chunk_saves[chunk_coord] = snapshot
 		return
