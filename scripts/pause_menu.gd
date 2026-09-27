@@ -24,6 +24,16 @@ var version_label: Label
 	$PauseMenu/Center/Panel/Buttons/MainMenuButton
 )
 
+@onready var saving_screen: Control = (
+	$PauseMenu/SavingScreen
+)
+@onready var saving_status: Label = (
+	$PauseMenu/SavingScreen/Center/Content/Status
+)
+@onready var saving_progress_bar: ProgressBar = (
+	$PauseMenu/SavingScreen/Center/Content/ProgressBar
+)
+
 
 @onready var center: Control = (
 	$PauseMenu/Center
@@ -138,6 +148,7 @@ const KEYBINDS_DIALOG_SCENE = preload("res://scenes/KeybindsDialog.tscn")
 
 
 var is_paused: bool = false
+var exit_in_progress: bool = false
 
 
 func _ready() -> void:
@@ -152,6 +163,7 @@ func _ready() -> void:
 	pause_menu.visible = false
 	settings_center.visible = false
 	statistics_center.visible = false
+	saving_screen.visible = false
 
 	resume_button.pressed.connect(resume_game)
 	settings_button.pressed.connect(open_settings)
@@ -179,6 +191,14 @@ func _ready() -> void:
 	view_bobbing_button.pressed.connect(_on_view_bobbing_pressed)
 	light_shaders_button.pressed.connect(_on_light_shaders_pressed)
 	keybinds_button.pressed.connect(_on_keybinds_pressed)
+
+	world.saving_progress.connect(
+		_on_world_saving_progress
+	)
+
+	saving_progress_bar.min_value = 0.0
+	saving_progress_bar.max_value = 100.0
+	saving_progress_bar.value = 0.0
 
 	back_button.pressed.connect(close_settings)
 	statistics_back_button.pressed.connect(close_statistics)
@@ -351,17 +371,78 @@ func _refresh_statistics() -> void:
 	)
 
 
-func quit_game() -> void:
-	world.save_world()
-	get_tree().quit()
+func _on_world_saving_progress(
+	completed: int,
+	total: int
+) -> void:
+	if not is_instance_valid(saving_screen):
+		return
+
+	if total <= 0:
+		saving_progress_bar.value = 100.0
+		saving_status.text = "Saving world..."
+		return
+
+	var percentage: float = (
+		float(completed) / float(total)
+	) * 100.0
+
+	saving_progress_bar.value = percentage
+	saving_status.text = "Saving world... %d%%" % roundi(
+		percentage
+	)
 
 
-func exit_to_main_menu() -> void:
-	world.save_world()
+func _begin_exit(
+	quit_after_save: bool
+) -> void:
+	if exit_in_progress:
+		return
+
+	exit_in_progress = true
+	is_paused = true
+
+	# Keep the world frozen while the save screen itself remains responsive.
+	get_tree().paused = true
+	pause_menu.visible = true
+	center.visible = false
+	settings_center.visible = false
+	statistics_center.visible = false
+	saving_screen.visible = true
+	saving_progress_bar.value = 0.0
+	saving_status.text = "Saving world..."
+
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+	await world.save_before_exit()
+	await world.finish_exit_cleanup()
+
+	saving_progress_bar.value = 100.0
+	saving_status.text = "World saved."
+
+	await get_tree().create_timer(
+		0.08,
+		true
+	).timeout
+
 	GameSession.clear()
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+
+	if quit_after_save:
+		get_tree().quit()
+	else:
+		get_tree().change_scene_to_file(
+			"res://scenes/MainMenu.tscn"
+		)
+
+
+func quit_game() -> void:
+	_begin_exit(true)
+
+
+func exit_to_main_menu() -> void:
+	_begin_exit(false)
 
 
 func load_current_settings() -> void:
