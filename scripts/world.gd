@@ -1235,7 +1235,10 @@ var startup_rendering: bool = false
 var world_name: String = "World"
 var world_seed: int = 12345
 var world_metadata: Dictionary = {}
+var saved_player_state: Dictionary = {}
 var dirty_chunks: Dictionary = {}
+signal saving_progress(completed: int, total: int)
+var exit_save_in_progress: bool = false
 # Newly generated chunks are cached separately from edit dirtiness so
 # periodic autosaves do not write the entire render distance at once.
 var generated_cache_pending: Dictionary = {}
@@ -1315,6 +1318,11 @@ func _ready() -> void:
 		player.camera.rotation.x = float(
 			world_metadata.get("player_pitch", 0.0)
 		)
+
+	if world_metadata.get("player_state") is Dictionary:
+		saved_player_state = world_metadata[
+			"player_state"
+		]
 
 	terrain_noise.seed = world_seed
 	terrain_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -5080,13 +5088,17 @@ func save_world() -> void:
 	if world_name == "":
 		return
 
-	# Autosave only snapshots changed/generated chunks. The actual disk writes
-	# are performed incrementally by process_pending_chunk_saves().
-	var dirty_keys: Array[Vector2i] = []
-	for chunk_coord in dirty_chunks:
-		dirty_keys.append(chunk_coord)
+	# Queue dirty and newly generated chunks instead of writing them all on
+	# the calling frame. The normal save worker below drains this gradually.
+	var save_candidates: Dictionary = {}
 
-	for chunk_coord in dirty_keys:
+	for chunk_coord in dirty_chunks:
+		save_candidates[chunk_coord] = true
+
+	for chunk_coord in generated_cache_pending:
+		save_candidates[chunk_coord] = true
+
+	for chunk_coord in save_candidates:
 		if not loaded_chunks.has(chunk_coord):
 			continue
 
@@ -5106,24 +5118,135 @@ func save_world() -> void:
 		world_name,
 		world_metadata
 	)
-	world_metadata["blocks_broken"] = blocks_broken
-	world_metadata["blocks_placed"] = blocks_placed
-	world_metadata["distance_travelled"] = distance_travelled
-	world_metadata["play_time_seconds"] = play_time_seconds
-	world_metadata["world_time_minutes"] = world_time_minutes
 
-	if player_spawned:
-		world_metadata["player_x"] = player.global_position.x
-		world_metadata["player_y"] = player.global_position.y
-		world_metadata["player_z"] = player.global_position.z
-		world_metadata["player_yaw"] = player.rotation.y
-		world_metadata["player_pitch"] = player.camera.rotation.x
 
+func save_before_exit() -> void:
+	if exit_save_in_progress:
+		return
+
+	exit_save_in_progress = true
+
+	# Build the final persistence queue while gameplay is paused. This
+	# snapshots only chunks that are dirty, newly generated, or already
+	# waiting to be saved from an unload.
+	save_world()
+
+	var save_coordinates: Array[Vector2i] = []
+	for chunk_coord in pending_chunk_saves:
+		save_coordinates.append(chunk_coord)
+
+	var total: int = save_coordinates.size()
+	var completed: int = 0
+	saving_progress.emit(completed, total)
+
+	var cursor: int = 0
+
+	while cursor < save_coordinates.size():
+		var frame_start_usec: int = Time.get_ticks_usec()
+		var frame_saved: int = 0
+
+		while cursor < save_coordinates.size():
+			if (
+				frame_saved > 0
+				and chunk_cache_saves_per_frame > 0
+				and frame_saved >= chunk_cache_saves_per_frame
+			):
+				break
+
+			var elapsed_ms: float = float(
+				Time.get_ticks_usec() - frame_start_usec
+			) / 1000.0
+
+			if frame_saved > 0 and elapsed_ms >= 4.0:
+				break
+
+			var chunk_coord: Vector2i = save_coordinates[cursor]
+			cursor += 1
+
+			if not pending_chunk_saves.has(chunk_coord):
+				continue
+
+			WorldStore.save_chunk(
+				world_name,
+				chunk_coord,
+				pending_chunk_saves[chunk_coord]
+			)
+
+			pending_chunk_saves.erase(chunk_coord)
+			pending_chunk_save_revisions.erase(chunk_coord)
+			generated_cache_pending.erase(chunk_coord)
+
+			if loaded_chunks.has(chunk_coord):
+				dirty_chunks.erase(chunk_coord)
+
+			completed += 1
+			frame_saved += 1
+
+		saving_progress.emit(completed, total)
+
+		if cursor < save_coordinates.size():
+			# process_always=true keeps the timer alive while the game is
+			# paused behind the saving screen.
+			await get_tree().create_timer(
+				0.0,
+				true
+			).timeout
+
+	pending_chunk_save_queue.clear()
+	pending_chunk_save_head = 0
+	pending_chunk_saves.clear()
+	pending_chunk_save_revisions.clear()
+	dirty_chunks.clear()
+
+	_update_world_metadata()
 	WorldStore.save_metadata(
 		world_name,
 		world_metadata
 	)
 
+	saving_progress.emit(total, total)
+	exit_save_in_progress = false
+
+
+func finish_exit_cleanup() -> void:
+	# Keep the saving screen visible while background workers finish so
+	# scene destruction never hides the UI before cleanup is complete.
+	while (
+		not generation_tasks.is_empty()
+		or not mesh_tasks.is_empty()
+		or not chunk_load_tasks.is_empty()
+	):
+		var completed_any: bool = false
+
+		for task_id in chunk_load_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				chunk_load_tasks.erase(task_id)
+				completed_any = true
+
+		for task_id in generation_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				generation_tasks.erase(task_id)
+				completed_any = true
+
+		for task_id in mesh_tasks.keys():
+			if WorkerThreadPool.is_task_completed(task_id):
+				WorkerThreadPool.wait_for_task_completion(task_id)
+				mesh_tasks.erase(task_id)
+				completed_any = true
+
+		if not completed_any:
+			await get_tree().create_timer(
+				0.0,
+				true
+			).timeout
+
+	chunk_load_tasks_by_coord.clear()
+
+	if render_regions != null:
+		render_regions.shutdown()
+		render_regions = null
 
 # ===================================================================
 # Loading screen / spawn
@@ -5364,6 +5487,14 @@ func try_start_gameplay() -> void:
 	startup_rendering = false
 	player_spawned = true
 
+	# Restore the saved pose only after nearby collision has been built.
+	# This prevents a saved crawl from briefly becoming a standing hitbox
+	# against unloaded/incomplete terrain.
+	if not saved_player_state.is_empty():
+		player.apply_persistent_state(
+			saved_player_state
+		)
+
 	player.set_physics_process(true)
 
 	last_player_position = player.global_position
@@ -5411,27 +5542,20 @@ func try_start_gameplay() -> void:
 	print(generation_profiler.get_summary())
 
 
-func _save_all_loaded_generated_chunks() -> void:
-	# Persist the generated world cache even when the player never edited
-	# anything. This is intentionally aggressive: subsequent launches can
-	# load voxel data directly instead of regenerating terrain.
-	for chunk_coord in loaded_chunks:
-		var chunk = loaded_chunks[chunk_coord]
-		if not chunk.is_generated:
-			continue
+func _exit_tree() -> void:
 
-		pending_chunk_saves.erase(chunk_coord)
-
-		WorldStore.save_chunk(
+	# Normal exits use save_before_exit(), so no large blocking save belongs
+	# here. Keep this callback lightweight as a final metadata update.
+	if world_name != "" and not exit_save_in_progress:
+		_update_world_metadata()
+		WorldStore.save_metadata(
 			world_name,
-			chunk_coord,
-			chunk.blocks
+			world_metadata
 		)
 
-	dirty_chunks.clear()
-
-
-func _exit_tree() -> void:
+	PerformanceProfiler.finish_session({
+		"generation_profile": generation_profiler.get_snapshot()
+	})
 
 	for chunk in chunk_release_queue:
 		if is_instance_valid(chunk):
@@ -5449,44 +5573,11 @@ func _exit_tree() -> void:
 	chunk_load_tasks.clear()
 	chunk_load_tasks_by_coord.clear()
 
-	PerformanceProfiler.finish_session({
-		"generation_profile": generation_profiler.get_snapshot()
-	})
-
-	save_world()
-	_save_all_loaded_generated_chunks()
-	_flush_pending_chunk_saves()
-
-	if render_regions != null:
-		render_regions.shutdown()
-		render_regions = null
-
 	for task_id in generation_tasks:
-		var wait_error: Error = (
-			WorkerThreadPool.wait_for_task_completion(
-				task_id
-			)
-		)
-
-		if wait_error != OK:
-			push_warning(
-				"Chunk generation task shutdown error: "
-				+ str(wait_error)
-			)
-
+		WorkerThreadPool.wait_for_task_completion(task_id)
 	generation_tasks.clear()
 
 	for task_id in mesh_tasks:
-		var wait_error: Error = (
-			WorkerThreadPool.wait_for_task_completion(
-				task_id
-			)
-		)
-
-		if wait_error != OK:
-			push_warning(
-				"Chunk mesh task shutdown error: "
-				+ str(wait_error)
-			)
-
+		WorkerThreadPool.wait_for_task_completion(task_id)
 	mesh_tasks.clear()
+
