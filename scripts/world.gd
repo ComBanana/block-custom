@@ -4313,19 +4313,24 @@ func process_mesh_queue() -> void:
 		# snapshot over newer block data; immediately schedule a fresh build.
 		if chunk.mesh_data_revision != result.data_revision:
 			chunk.mesh_building = false
-			chunk.mesh_ready = false
-			chunk.collision_ready = false
-			chunk.set_generation_stage(Chunk.GenerationStage.MESH_QUEUED)
-			chunk.mesh_rebuild_requested = false
-			chunk.water_mesh_rebuild_requested = false
-			if result.water_only:
-				enqueue_water_mesh_chunk(
-					result.chunk_coordinate
+			# Keep any previous visual mesh/collision usable. A stale water
+			# result only needs another water build; a solid result needs a
+			# complete rebuild and collision refresh.
+			if not result.water_only:
+				chunk.mesh_ready = false
+				chunk.collision_ready = false
+				chunk.set_generation_stage(
+					Chunk.GenerationStage.MESH_QUEUED
 				)
-			else:
 				enqueue_mesh_chunk(
 					result.chunk_coordinate
 				)
+			else:
+				enqueue_water_mesh_chunk(
+					result.chunk_coordinate
+				)
+			chunk.mesh_rebuild_requested = false
+			chunk.water_mesh_rebuild_requested = false
 			continue
 
 		if result.water_only:
@@ -4349,10 +4354,12 @@ func process_mesh_queue() -> void:
 			"mesh_apply",
 			float(Time.get_ticks_usec() - mesh_apply_start_usec) / 1000.0
 		)
-			if not result.water_only:
+
+		if not result.water_only:
 			enqueue_collision_chunk(
 				result.chunk_coordinate
 			)
+
 		applied_count += 1
 
 	# ---------------------------------------------------------------
@@ -4423,6 +4430,10 @@ func process_mesh_queue() -> void:
 			)
 		)
 
+		result.water_only = (
+			active_mesh_priority == PRIORITY_WATER
+		)
+
 		var task_id: int = WorkerThreadPool.add_task(
 			mesh_callable,
 			(
@@ -4437,10 +4448,6 @@ func process_mesh_queue() -> void:
 			]
 		)
 
-		result.job_id = chunk.mesh_job_id
-		result.water_only = (
-			active_mesh_priority == PRIORITY_WATER
-		)
 		mesh_tasks[task_id] = result
 
 		if active_mesh_priority == PRIORITY_PLAYER:
