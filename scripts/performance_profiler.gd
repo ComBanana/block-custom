@@ -1285,20 +1285,6 @@ func _reset_sample_chunk_boundary_stats() -> void:
 	_sample_chunk_boundary_collision_max_ms = 0.0
 
 
-func _update_peak_metrics(snapshot: Dictionary) -> void:
-	for key in snapshot.keys():
-		var metric_name: String = str(key)
-		var value: float = float(snapshot[key])
-		var current_peak: float = float(
-			_session_peak_metrics.get(metric_name, -INF)
-		)
-
-		_session_peak_metrics[metric_name] = maxf(
-			current_peak,
-			value
-		)
-
-
 func _report_directory() -> String:
 	var appdata: String = OS.get_environment("APPDATA")
 	if appdata.is_empty():
