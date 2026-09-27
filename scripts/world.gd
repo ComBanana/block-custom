@@ -4024,7 +4024,7 @@ func _capture_render_region_snapshot(
 	return {
 		"blocks": chunk.get_blocks_snapshot(),
 		"max_y_exclusive": chunk.mesh_max_y_exclusive,
-		"revision": chunk.mesh_data_revision
+		"revision": chunk.data_revision
 	}
 
 
@@ -4940,7 +4940,7 @@ func unload_chunk(
 			_queue_chunk_save(
 				chunk_coord,
 				chunk.get_blocks_snapshot(),
-				chunk.mesh_data_revision
+				chunk.data_revision
 			)
 		generated_cache_pending.erase(chunk_coord)
 		dirty_chunks.erase(chunk_coord)
@@ -5270,7 +5270,7 @@ func save_world() -> void:
 		_queue_chunk_save(
 			chunk_coord,
 			chunk.get_blocks_snapshot(),
-			chunk.mesh_data_revision
+			chunk.data_revision
 		)
 
 	_update_world_metadata()
