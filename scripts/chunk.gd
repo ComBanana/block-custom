@@ -73,9 +73,12 @@ var solid_material: ShaderMaterial
 var water_material: StandardMaterial3D
 
 var mesh_job_id: int = 0
-# Incremented whenever block data changes. Mesh workers carry the revision
-# they captured so stale asynchronous results can never overwrite newer data.
+# Incremented when solid terrain geometry/texture data changes. Pure fluid
+# mutations do not invalidate an in-progress solid mesh build.
 var mesh_data_revision: int = 0
+# Incremented when fluid voxel data changes. Water-only mesh workers use this
+# revision so large fluid events do not invalidate solid terrain work.
+var water_data_revision: int = 0
 var collision_faces := PackedVector3Array()
 # Far chunks that are already represented by a render region do not need to
 # keep their full 64 KiB voxel buffer resident. The compressed copy is restored
@@ -116,6 +119,7 @@ func reset_for_reuse() -> void:
 	terrain_x = 0
 	mesh_x = 0
 	mesh_data_revision += 1
+	water_data_revision += 1
 	collision_faces = PackedVector3Array()
 	mesh_max_y_exclusive = 1
 	visible = true
@@ -637,6 +641,7 @@ func apply_generated_data(
 	blocks = generated_blocks
 	_recalculate_mesh_max_y()
 	mesh_data_revision += 1
+	water_data_revision += 1
 	set_generation_stage(GenerationStage.TERRAIN_READY)
 
 	terrain_x = CHUNK_SIZE
