@@ -172,6 +172,7 @@ class MeshResult:
 	var job_id: int = 0
 	var water_only: bool = false
 	var data_revision: int = 0
+	var water_data_revision: int = 0
 	var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 	var capture_ms: float = 0.0
 	var mesh_ms: float = 0.0
@@ -1017,23 +1018,41 @@ func _process_water_position(
 
 
 func _promote_scheduled_water_ticks() -> void:
-	var bucket: Array = water_schedule_buckets.get(game_tick, [])
-	if bucket.is_empty():
-		return
+	# Promote every scheduled bucket that is due. Water itself is processed
+	# only once per rendered frame, even when several fixed ticks elapsed.
+	var due_ticks: Array[int] = []
 
-	water_schedule_buckets.erase(game_tick)
+	for scheduled_tick_variant in water_schedule_buckets.keys():
+		var scheduled_tick: int = int(scheduled_tick_variant)
+		if scheduled_tick <= game_tick:
+			due_ticks.append(scheduled_tick)
 
-	for position_variant in bucket:
-		var block_position: Vector3i = position_variant
+	due_ticks.sort()
 
-		if int(water_scheduled_ticks.get(block_position, -1)) != game_tick:
-			continue
+	for scheduled_tick in due_ticks:
+		var bucket: Array = water_schedule_buckets.get(
+			scheduled_tick,
+			[]
+		)
+		water_schedule_buckets.erase(scheduled_tick)
 
-		water_scheduled_ticks.erase(block_position)
+		for position_variant in bucket:
+			var block_position: Vector3i = position_variant
+			var current_scheduled_tick: int = int(
+				water_scheduled_ticks.get(
+					block_position,
+					-1
+				)
+			)
 
-		if not water_updates_queued.has(block_position):
-			water_update_queue.append(block_position)
-			water_updates_queued[block_position] = true
+			if current_scheduled_tick > game_tick:
+				continue
+
+			water_scheduled_ticks.erase(block_position)
+
+			if not water_updates_queued.has(block_position):
+				water_update_queue.append(block_position)
+				water_updates_queued[block_position] = true
 
 
 func process_water_tick() -> void:
@@ -2022,20 +2041,12 @@ func process_block_update_tick() -> void:
 func process_game_tick() -> void:
 	game_tick += 1
 
-	# Block changes happen first, then fluid ticks react to the resulting
-	# block states in the same authoritative game tick.
+	# Block changes advance at the authoritative 20 TPS rate.
 	var block_updates_start_usec: int = Time.get_ticks_usec()
 	process_block_update_tick()
 	PerformanceProfiler.record_phase(
 		"simulation/block_updates",
 		float(Time.get_ticks_usec() - block_updates_start_usec) / 1000.0
-	)
-
-	var water_tick_start_usec: int = Time.get_ticks_usec()
-	process_water_tick()
-	PerformanceProfiler.record_phase(
-		"simulation/water_tick",
-		float(Time.get_ticks_usec() - water_tick_start_usec) / 1000.0
 	)
 
 
@@ -2057,14 +2068,22 @@ func process_game_ticks(delta: float) -> void:
 		process_game_tick()
 		ticks_run += 1
 
+	# Event-driven water is processed at most once per rendered frame.
+	# Multiple fixed-tick catch-up steps therefore cannot stack water work.
+	if ticks_run > 0:
+		var water_tick_start_usec: int = Time.get_ticks_usec()
+		process_water_tick()
+		PerformanceProfiler.record_phase(
+			"simulation/water_tick",
+			float(Time.get_ticks_usec() - water_tick_start_usec) / 1000.0
+		)
+
 	# Avoid an extended frame-time spike causing an unbounded catch-up loop.
 	if ticks_run >= MAX_GAME_TICKS_PER_FRAME:
 		game_tick_accumulator = minf(
 			game_tick_accumulator,
 			GAME_TICK_INTERVAL
 		)
-
-
 # ===================================================================
 # Adaptive streaming and profiling
 # ===================================================================
@@ -4369,15 +4388,21 @@ func process_mesh_queue() -> void:
 
 		var mesh_apply_start_usec := Time.get_ticks_usec()
 
-		# A worker may have captured an older block snapshot while the main
-		# thread processed a player edit or a fluid tick. Never apply a stale
-		# snapshot over newer block data; immediately schedule a fresh build.
-		if chunk.mesh_data_revision != result.data_revision:
-			chunk.mesh_building = false
-			# Keep any previous visual mesh/collision usable. A stale water
-			# result only needs another water build; a solid result needs a
-			# complete rebuild and collision refresh.
-			if not result.water_only:
+		if result.water_only:
+			# Fluid-only workers are invalidated only by later fluid changes.
+			if chunk.water_data_revision != result.water_data_revision:
+				chunk.mesh_building = false
+				chunk.water_mesh_rebuild_requested = false
+				enqueue_water_mesh_chunk(result.chunk_coordinate)
+				continue
+
+			chunk.apply_water_mesh(
+				result.buffer.water
+			)
+		else:
+			# Large fluid events do not invalidate solid terrain workers.
+			if chunk.mesh_data_revision != result.data_revision:
+				chunk.mesh_building = false
 				chunk.mesh_ready = false
 				chunk.collision_ready = false
 				chunk.set_generation_stage(
@@ -4386,22 +4411,21 @@ func process_mesh_queue() -> void:
 				enqueue_mesh_chunk(
 					result.chunk_coordinate
 				)
-			else:
-				enqueue_water_mesh_chunk(
-					result.chunk_coordinate
-				)
-			chunk.mesh_rebuild_requested = false
-			chunk.water_mesh_rebuild_requested = false
-			continue
+				chunk.mesh_rebuild_requested = false
+				chunk.water_mesh_rebuild_requested = false
+				continue
 
-		if result.water_only:
-			chunk.apply_water_mesh(
-				result.buffer.water
-			)
-		else:
-			chunk.apply_mesh_buffer(
-				result.buffer
-			)
+			# If fluid changed during the build, keep the useful solid result
+			# and refresh only the water surface.
+			if chunk.water_data_revision != result.water_data_revision:
+				chunk.apply_solid_mesh_buffer(
+					result.buffer
+				)
+				enqueue_water_mesh_chunk(result.chunk_coordinate)
+			else:
+				chunk.apply_mesh_buffer(
+					result.buffer
+				)
 
 		if chunk.mesh_rebuild_requested:
 			chunk.mesh_rebuild_requested = false
@@ -4477,6 +4501,7 @@ func process_mesh_queue() -> void:
 		result.chunk_coordinate = chunk_coord
 		result.job_id = chunk.mesh_job_id
 		result.data_revision = chunk.mesh_data_revision
+		result.water_data_revision = chunk.water_data_revision
 		_capture_mesh_inputs(
 			chunk_coord,
 			result
@@ -5065,9 +5090,18 @@ func set_block_world(
 	if render_regions != null:
 		render_regions.mark_chunk_dirty(chunk_coord)
 
-	# Every block-state mutation gets its own revision. Worker mesh jobs use
-	# this to reject snapshots that were captured before the mutation.
-	chunk.mesh_data_revision += 1
+	# Solid terrain and fluid geometry have independent revisions. Pure fluid
+	# changes therefore do not invalidate in-progress terrain mesh workers.
+	var old_is_water: bool = _is_water(old_block_id)
+	var new_is_water: bool = _is_water(block_id)
+	var old_is_solid: bool = old_block_id != AIR and not old_is_water
+	var new_is_solid: bool = block_id != AIR and not new_is_water
+
+	if old_is_solid or new_is_solid:
+		chunk.mesh_data_revision += 1
+
+	if old_is_water or new_is_water:
+		chunk.water_data_revision += 1
 
 	if not update_mesh and chunk.mesh_building:
 		# Fluid changed the data while a mesh worker was already building.
