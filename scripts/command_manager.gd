@@ -85,12 +85,9 @@ func _execute_tp(
 		float(args[2])
 	)
 
-	# Refuse destinations outside the generated world height.
-	if target.y < 0.0 or target.y >= 64.0:
-		return {
-			"success": false,
-			"message": "Y coordinate must be between 0 and 63."
-		}
+	# Y is intentionally unrestricted. The world streamer prepares the
+	# destination using X/Z, while the player can be placed above or below
+	# the generated terrain for recovery/debugging.
 
 	# Let the world streamer prepare the destination instead of
 	# requiring the destination chunk to already be loaded.
