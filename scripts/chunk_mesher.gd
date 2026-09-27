@@ -156,17 +156,12 @@ class MeshBuffer:
 		v2: Vector3,
 		v3: Vector3
 	) -> void:
-		# The render quads use the opposite winding from the outward collision
-		# normal. ConcavePolygonShape3D is front-face sensitive by default, so
-		# reverse each collision triangle instead of relying on backface
-		# collision. This makes terrain tops collide from above and keeps the
-		# collision surface correctly oriented on every face.
 		collision_faces.append(v0)
-		collision_faces.append(v2)
 		collision_faces.append(v1)
-		collision_faces.append(v0)
-		collision_faces.append(v3)
 		collision_faces.append(v2)
+		collision_faces.append(v0)
+		collision_faces.append(v2)
+		collision_faces.append(v3)
 
 
 static func chunk_index(x: int, y: int, z: int) -> int:
