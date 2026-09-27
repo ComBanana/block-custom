@@ -45,6 +45,8 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export_category("Loading")
 @export var spawn_load_radius: int = 1
 @export var loading_chunks_per_frame: int = 24
+@export var loading_chunk_load_apply_limit: int = 24
+@export var loading_chunk_load_budget_ms: float = 4.0
 @export var loading_generation_boost: int = 8
 @export var loading_mesh_boost: int = 4
 @export var loading_mesh_apply_boost: int = 6
@@ -57,7 +59,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 
 @export_category("Streaming")
-@export var chunks_loaded_per_frame: int = 12
+@export var chunks_loaded_per_frame: int = 4
+@export var max_chunk_load_tasks: int = 4
+@export var gameplay_chunk_load_apply_limit: int = 2
+@export var gameplay_chunk_load_budget_ms: float = 1.0
 @export var max_generation_tasks: int = 8
 @export var max_mesh_tasks: int = 6
 @export var mesh_columns_per_frame: int = 16
@@ -82,6 +87,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var water_updates_per_tick: int = 2048
 @export_range(1, 20, 1) var water_tick_delay: int = DEFAULT_WATER_TICK_DELAY
 @export var water_budget_ms: float = 2.0
+@export var water_frame_budget_ms: float = 2.5
 @export var water_falling_blocks_per_update: int = 8
 
 
@@ -134,6 +140,14 @@ class GenerationResult:
 class BlockUpdate:
 	var position: Vector3
 	var block_id: int
+
+class ChunkLoadResult:
+	var chunk_coordinate: Vector2i
+	var chunk_path: String = ""
+	var saved_blocks: PackedByteArray
+	var save_revision: int = 0
+	var load_ms: float = 0.0
+
 
 class MeshResult:
 	var chunk_coordinate: Vector2i
@@ -189,6 +203,11 @@ signal teleport_completed(message: String)
 
 var load_queue: Array[Vector2i] = []
 var load_queued: Dictionary = {}
+# Disk reads run asynchronously so chunk streaming never blocks the main
+# thread on FileAccess operations. Results are applied by process_load_queue().
+var chunk_load_tasks: Dictionary = {}
+var chunk_load_tasks_by_coord: Dictionary = {}
+var chunk_save_revisions: Dictionary = {}
 
 
 # ===================================================================
@@ -971,6 +990,20 @@ func process_water_tick() -> void:
 
 	var processed: int = 0
 	var budget_start_usec := Time.get_ticks_usec()
+	var tick_budget_ms: float = maxf(
+		water_budget_ms,
+		0.0
+	)
+
+	if water_frame_budget_ms > 0.0:
+		tick_budget_ms = minf(
+			tick_budget_ms,
+			water_frame_budget_remaining_ms
+		)
+
+	if tick_budget_ms <= 0.0:
+		PerformanceProfiler.record_water_tick(0)
+		return
 
 	# Fluid updates created while this tick is being processed are deferred
 	# until their own scheduled game tick.
@@ -982,8 +1015,8 @@ func process_water_tick() -> void:
 	):
 		if (
 			processed > 0
-			and water_budget_ms > 0.0
-			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= water_budget_ms
+			and tick_budget_ms > 0.0
+			and float(Time.get_ticks_usec() - budget_start_usec) / 1000.0 >= tick_budget_ms
 		):
 			break
 
@@ -1012,6 +1045,15 @@ func process_water_tick() -> void:
 			water_update_queue_head
 		)
 		water_update_queue_head = 0
+
+	var elapsed_ms := float(
+		Time.get_ticks_usec() - budget_start_usec
+	) / 1000.0
+	if water_frame_budget_ms > 0.0:
+		water_frame_budget_remaining_ms = maxf(
+			0.0,
+			water_frame_budget_remaining_ms - elapsed_ms
+	)
 
 	PerformanceProfiler.record_water_tick(processed)
 
@@ -1136,6 +1178,7 @@ var water_block_cache: Dictionary = {}
 
 var game_tick: int = 0
 var game_tick_accumulator: float = 0.0
+var water_frame_budget_remaining_ms: float = 0.0
 
 
 # ===================================================================
@@ -1743,7 +1786,7 @@ func _process(delta: float) -> void:
 			)
 
 			var collision_range_start_usec: int = Time.get_ticks_usec()
-			update_collision_range()
+			update_collision_range(previous_chunk)
 			var collision_range_ms: float = (
 				float(Time.get_ticks_usec() - collision_range_start_usec)
 				/ 1000.0
@@ -1777,6 +1820,7 @@ func _process(delta: float) -> void:
 					"loaded_chunks": loaded_chunks.size(),
 					"required_chunks": required_chunks.size(),
 					"load_queue": load_queue.size(),
+					"chunk_load_tasks": chunk_load_tasks.size(),
 					"generation_queue": generation_queue.size(),
 					"critical_generation_queue": critical_generation_queue.size(),
 					"generation_tasks": generation_tasks.size(),
@@ -1820,6 +1864,13 @@ func _process(delta: float) -> void:
 
 	# Gameplay simulation is fixed at 20 ticks per second. Rendering and
 	# asynchronous chunk workers remain frame/worker driven independently.
+	# Keep fluid catch-up bounded across all fixed ticks in this rendered
+	# frame. A slow frame must not turn into five consecutive 2 ms fluid
+	# budgets and create another visible hitch.
+	water_frame_budget_remaining_ms = maxf(
+		water_frame_budget_ms,
+		0.0
+	)
 	phase_start_usec = Time.get_ticks_usec()
 	process_game_ticks(delta)
 	PerformanceProfiler.record_phase(
@@ -1841,6 +1892,7 @@ func _process(delta: float) -> void:
 			_background_worker_capacity()
 			- generation_tasks.size()
 			- mesh_tasks.size()
+			- chunk_load_tasks.size()
 		)
 		render_regions.process(
 			mini(1, region_worker_slots),
@@ -1885,6 +1937,7 @@ func _process(delta: float) -> void:
 		"generation_tasks": generation_tasks.size(),
 		"mesh_tasks": mesh_tasks.size(),
 		"load_queue": load_queue.size(),
+		"chunk_load_tasks": chunk_load_tasks.size(),
 		"generation_queue": generation_queue.size(),
 		"critical_mesh_queue": critical_mesh_queue.size(),
 		"near_mesh_queue": near_mesh_queue.size(),
@@ -2050,7 +2103,9 @@ func _generation_submit_limit() -> int:
 
 	var available_slots := maxi(
 		0,
-		total_limit - mesh_tasks.size()
+		total_limit
+		- mesh_tasks.size()
+		- chunk_load_tasks.size()
 	)
 
 	return mini(
@@ -2068,7 +2123,9 @@ func _mesh_submit_limit() -> int:
 
 	var available_slots := maxi(
 		0,
-		total_limit - generation_tasks.size()
+		total_limit
+		- generation_tasks.size()
+		- chunk_load_tasks.size()
 	)
 
 	return mini(
@@ -2923,48 +2980,220 @@ func update_chunks(
 # Chunk loading
 # ===================================================================
 
+func _compare_completed_chunk_load_tasks(
+	first_id: int,
+	second_id: int
+) -> bool:
+	if not chunk_load_tasks.has(first_id):
+		return false
+
+	if not chunk_load_tasks.has(second_id):
+		return true
+
+	var first_result: ChunkLoadResult = chunk_load_tasks[first_id]
+	var second_result: ChunkLoadResult = chunk_load_tasks[second_id]
+
+	var first_score := _chunk_stream_score(
+		first_result.chunk_coordinate
+	)
+	var second_score := _chunk_stream_score(
+		second_result.chunk_coordinate
+	)
+
+	if is_equal_approx(first_score, second_score):
+		return first_id < second_id
+
+	return first_score > second_score
+
+
 func process_load_queue() -> void:
 
-	var loads_done: int = 0
-	var load_limit: int = chunks_loaded_per_frame
+	# Gameplay chunk loading is deliberately two-stage: disk I/O happens on
+	# worker threads, while node creation stays on the main thread under a
+	# small frame budget. Startup keeps the previous aggressive apply rate
+	# because the player is still blocked behind the loading screen.
+	var apply_limit: int = gameplay_chunk_load_apply_limit
+	var apply_budget_ms: float = gameplay_chunk_load_budget_ms
+	var submit_limit: int = maxi(
+		1,
+		chunks_loaded_per_frame
+	)
+	var max_in_flight: int = maxi(
+		1,
+		max_chunk_load_tasks
+	)
 
-	# During the loading screen the player is not moving, so loading
-	# chunk nodes can be much more aggressive without competing with
-	# gameplay input or physics.
 	if not player_spawned:
-		load_limit = maxi(
-			load_limit,
+		apply_limit = loading_chunk_load_apply_limit
+		apply_budget_ms = loading_chunk_load_budget_ms
+		submit_limit = maxi(
+			submit_limit,
 			loading_chunks_per_frame
 		)
 
+	max_in_flight = mini(
+		max_in_flight,
+		submit_limit
+	)
+
+	# ---------------------------------------------------------------
+	# APPLY COMPLETED DISK READS
+	# ---------------------------------------------------------------
+
+	var completed_tasks: Array[int] = []
+	for task_id in chunk_load_tasks:
+		if WorkerThreadPool.is_task_completed(task_id):
+			completed_tasks.append(task_id)
+
+	if completed_tasks.size() > 1:
+		completed_tasks.sort_custom(
+			_compare_completed_chunk_load_tasks
+		)
+
+	var apply_start_usec := Time.get_ticks_usec()
+	var applied_count: int = 0
+
 	while (
-		loads_done < load_limit
+		applied_count < apply_limit
+		and not completed_tasks.is_empty()
+	):
+		if (
+			applied_count > 0
+			and apply_budget_ms > 0.0
+			and float(Time.get_ticks_usec() - apply_start_usec) / 1000.0 >= apply_budget_ms
+		):
+			break
+
+		var task_id: int = completed_tasks.pop_front()
+		var result: ChunkLoadResult = chunk_load_tasks[task_id]
+
+		var wait_error := WorkerThreadPool.wait_for_task_completion(
+			task_id
+		)
+
+		chunk_load_tasks.erase(task_id)
+		chunk_load_tasks_by_coord.erase(result.chunk_coordinate)
+
+		if wait_error != OK:
+			push_error(
+				"Chunk load task failed: " + str(wait_error)
+			)
+			continue
+
+		PerformanceProfiler.record_phase(
+			"streaming/chunk_disk_read",
+			result.load_ms
+		)
+
+		if not _is_chunk_needed(result.chunk_coordinate):
+			continue
+
+		if loaded_chunks.has(result.chunk_coordinate):
+			continue
+
+		# An unload save may have been flushed after this worker started.
+		# If no pending in-memory snapshot remains, retry the disk read
+		# asynchronously instead of applying an older snapshot.
+		if (
+			not pending_chunk_saves.has(result.chunk_coordinate)
+			and result.save_revision != int(
+				chunk_save_revisions.get(result.chunk_coordinate, 0)
+			)
+		):
+			if not load_queued.has(result.chunk_coordinate):
+				load_queue.push_front(result.chunk_coordinate)
+				load_queued[result.chunk_coordinate] = true
+			continue
+
+		# The player may have returned to a chunk while its unload save
+		# was still queued. Never let an older disk snapshot overwrite it.
+		var blocks_to_apply: PackedByteArray = result.saved_blocks
+		if pending_chunk_saves.has(result.chunk_coordinate):
+			blocks_to_apply = pending_chunk_saves[
+				result.chunk_coordinate
+			]
+
+		var chunk_apply_start_usec := Time.get_ticks_usec()
+		load_chunk(
+			result.chunk_coordinate,
+			blocks_to_apply
+		)
+		PerformanceProfiler.record_phase(
+			"streaming/chunk_apply",
+			float(
+				Time.get_ticks_usec() - chunk_apply_start_usec
+			) / 1000.0
+		)
+		applied_count += 1
+
+	# ---------------------------------------------------------------
+	# SUBMIT NEW DISK READS
+	# ---------------------------------------------------------------
+
+	while (
+		chunk_load_tasks.size() < max_in_flight
 		and not load_queue.is_empty()
 	):
+		var chunk_coord: Vector2i = load_queue.pop_front()
+		load_queued.erase(chunk_coord)
 
-		var chunk_coord: Vector2i = (
-			load_queue.pop_front()
-		)
-
-		load_queued.erase(
-			chunk_coord
-		)
-
-		if not _is_chunk_needed(
-			chunk_coord
-		):
+		if not _is_chunk_needed(chunk_coord):
 			continue
 
-		if loaded_chunks.has(
-			chunk_coord
-		):
+		if loaded_chunks.has(chunk_coord):
 			continue
 
-		load_chunk(
+		# A deferred unload save is already in memory and is newer than disk.
+		# Avoid scheduling an unnecessary disk read and apply it directly.
+		if pending_chunk_saves.has(chunk_coord):
+			if (
+				applied_count >= apply_limit
+				or (
+					applied_count > 0
+					and apply_budget_ms > 0.0
+					and float(
+						Time.get_ticks_usec() - apply_start_usec
+					) / 1000.0 >= apply_budget_ms
+				)
+			):
+				load_queue.push_front(chunk_coord)
+				load_queued[chunk_coord] = true
+				break
+
+			load_chunk(
+				chunk_coord,
+				pending_chunk_saves[chunk_coord]
+			)
+			applied_count += 1
+			continue
+
+		if chunk_load_tasks_by_coord.has(chunk_coord):
+			continue
+
+		var result := ChunkLoadResult.new()
+		result.chunk_coordinate = chunk_coord
+		result.save_revision = int(
+			chunk_save_revisions.get(chunk_coord, 0)
+		)
+		result.chunk_path = WorldStore.chunk_path(
+			world_name,
 			chunk_coord
 		)
 
-		loads_done += 1
+		var task_id := WorkerThreadPool.add_task(
+			Callable(
+				self,
+				"_load_chunk_data_worker"
+			).bind(result),
+			false,
+			"Load chunk (%d, %d)" % [
+				chunk_coord.x,
+				chunk_coord.y
+			]
+		)
+
+		chunk_load_tasks[task_id] = result
+		chunk_load_tasks_by_coord[chunk_coord] = task_id
 
 
 func _migrate_saved_chunk_data(
@@ -2998,8 +3227,34 @@ func _migrate_saved_chunk_data(
 	return PackedByteArray()
 
 
+func _load_chunk_data_worker(
+	result: ChunkLoadResult
+) -> void:
+	var start_usec := Time.get_ticks_usec()
+
+	if not FileAccess.file_exists(result.chunk_path):
+		result.saved_blocks = PackedByteArray()
+	else:
+		var file := FileAccess.open(
+			result.chunk_path,
+			FileAccess.READ
+		)
+
+		if file == null:
+			result.saved_blocks = PackedByteArray()
+		else:
+			result.saved_blocks = file.get_buffer(
+				file.get_length()
+			)
+
+	result.load_ms = float(
+		Time.get_ticks_usec() - start_usec
+	) / 1000.0
+
+
 func load_chunk(
-	chunk_coord: Vector2i
+	chunk_coord: Vector2i,
+	saved_blocks: PackedByteArray = PackedByteArray()
 ) -> void:
 
 	var chunk = chunk_scene.instantiate()
@@ -3034,18 +3289,6 @@ func load_chunk(
 		render_regions.register_chunk(chunk_coord)
 
 	var expected_size: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
-
-	# A deferred unload save can still be waiting when the player returns to
-	# the same chunk. Its in-memory snapshot is newer than the disk copy and
-	# must be used so edits are never rolled back.
-	var saved_blocks: PackedByteArray = PackedByteArray()
-	if pending_chunk_saves.has(chunk_coord):
-		saved_blocks = pending_chunk_saves[chunk_coord]
-	else:
-		saved_blocks = WorldStore.load_chunk(
-			world_name,
-			chunk_coord
-		)
 
 	var migrated_blocks := _migrate_saved_chunk_data(
 		saved_blocks,
@@ -4093,32 +4336,68 @@ func enqueue_collision_chunk(
 	] = true
 
 
-func update_collision_range() -> void:
+func _update_collision_chunk_state(
+	chunk_coord: Vector2i
+) -> void:
+	if not loaded_chunks.has(chunk_coord):
+		return
 
-	for chunk_coord in loaded_chunks:
+	var chunk = loaded_chunks[chunk_coord]
 
-		var chunk = loaded_chunks[
-			chunk_coord
-		]
+	if (
+		is_chunk_within_collision_distance(chunk_coord)
+		or _is_chunk_teleport_required(chunk_coord)
+	):
+		if chunk.mesh_ready and not chunk.collision_ready:
+			enqueue_collision_chunk(chunk_coord)
+	else:
+		if chunk.collision_ready:
+			chunk.clear_collision()
 
-		if (
-			is_chunk_within_collision_distance(chunk_coord)
-			or _is_chunk_teleport_required(chunk_coord)
-		):
 
-			if (
-				chunk.mesh_ready
-				and not chunk.collision_ready
-			):
+func update_collision_range(
+	previous_chunk: Vector2i = INVALID_CHUNK
+) -> void:
+	# Initial startup and large teleports require a full reconciliation.
+	if (
+		previous_chunk == INVALID_CHUNK
+		or abs(player_chunk.x - previous_chunk.x) > 1
+		or abs(player_chunk.y - previous_chunk.y) > 1
+	):
+		for chunk_coord in loaded_chunks:
+			_update_collision_chunk_state(chunk_coord)
+		return
 
-				enqueue_collision_chunk(
-					chunk_coord
-				)
+	var old_center := previous_chunk
+	var new_center := player_chunk
+	var radius: int = maxi(0, collision_distance)
+	var changed: Dictionary = {}
 
-		else:
+	# Compare only the union of the old and new collision squares. This
+	# handles diagonal crossings and negative chunk coordinates correctly,
+	# without scanning the entire RD32 loaded-chunk dictionary.
+	var min_x := mini(old_center.x, new_center.x) - radius
+	var max_x := maxi(old_center.x, new_center.x) + radius
+	var min_z := mini(old_center.y, new_center.y) - radius
+	var max_z := maxi(old_center.y, new_center.y) + radius
 
-			if chunk.collision_ready:
-				chunk.clear_collision()
+	for x in range(min_x, max_x + 1):
+		for z in range(min_z, max_z + 1):
+			var was_near := (
+				abs(x - old_center.x) <= radius
+				and abs(z - old_center.y) <= radius
+			)
+			var is_near := (
+				abs(x - new_center.x) <= radius
+				and abs(z - new_center.y) <= radius
+			)
+
+			if was_near != is_near:
+				changed[Vector2i(x, z)] = true
+
+	for chunk_variant in changed.keys():
+		var chunk_coord: Vector2i = chunk_variant
+		_update_collision_chunk_state(chunk_coord)
 
 
 func process_collision_queue() -> void:
@@ -4175,6 +4454,9 @@ func _queue_chunk_save(
 	blocks: PackedByteArray
 ) -> void:
 	var snapshot: PackedByteArray = blocks.duplicate()
+	chunk_save_revisions[chunk_coord] = int(
+		chunk_save_revisions.get(chunk_coord, 0)
+	) + 1
 	if pending_chunk_saves.has(chunk_coord):
 		pending_chunk_saves[chunk_coord] = snapshot
 		return
@@ -4880,6 +5162,11 @@ func _save_all_loaded_generated_chunks() -> void:
 
 
 func _exit_tree() -> void:
+
+	for task_id in chunk_load_tasks:
+		WorkerThreadPool.wait_for_task_completion(task_id)
+	chunk_load_tasks.clear()
+	chunk_load_tasks_by_coord.clear()
 
 	PerformanceProfiler.finish_session({
 		"generation_profile": generation_profiler.get_snapshot()
