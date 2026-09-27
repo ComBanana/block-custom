@@ -3635,6 +3635,7 @@ func load_chunk(
 	)
 
 	chunk.chunk_coordinate = chunk_coord
+	chunk.world = self
 
 	chunk.terrain_noise = terrain_noise
 	chunk.hill_noise = hill_noise
@@ -3649,7 +3650,18 @@ func load_chunk(
 
 	loaded_chunks[chunk_coord] = chunk
 
-	add_child(chunk)
+	# Far chunks are data-only while the 4x4 render-region system represents
+	# them visually. Keeping thousands of inactive Chunk nodes out of the
+	# SceneTree avoids unnecessary node/culling/physics overhead at large
+	# render distances. Near chunks are attached when they enter the active
+	# individual-rendering ring.
+	var should_attach_to_tree: bool = (
+		render_regions == null
+		or not render_regions.is_chunk_batched(chunk_coord)
+	)
+
+	if should_attach_to_tree:
+		add_child(chunk)
 
 	if render_regions != null:
 		render_regions.register_chunk(chunk_coord)
@@ -4200,9 +4212,19 @@ func _on_render_region_visibility_changed(
 			chunk_coord
 		):
 			chunk.clear_visual_meshes()
+			# Keep far chunks as data-only objects. They remain in loaded_chunks
+			# so the region system can snapshot their voxel data without paying
+			# SceneTree/node and Jolt-body overhead.
+			if chunk.is_inside_tree():
+				remove_child(chunk)
 		return
 
 	# The chunk has moved back into the individually rendered near ring.
+	# Reattach it before touching its MeshInstance3D children so _ready() and
+	# the normal scene-tree lifecycle are restored.
+	if not chunk.is_inside_tree():
+		add_child(chunk)
+
 	# Its old regional representation no longer covers it, so build its
 	# independent mesh again.
 	chunk.get_node("ChunkMesh").visible = true
