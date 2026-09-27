@@ -74,6 +74,10 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var gameplay_mesh_refill_per_frame: int = 3
 @export var collisions_per_frame: int = 2
 @export var critical_chunk_distance: int = 3
+@export var max_cached_chunk_data: int = 256
+@export var chunk_release_per_frame: int = 8
+@export var chunk_release_budget_ms: float = 0.8
+@export var chunk_reuse_pool_limit: int = 96
 
 
 @export_category("Collision")
@@ -208,6 +212,17 @@ var load_queued: Dictionary = {}
 var chunk_load_tasks: Dictionary = {}
 var chunk_load_tasks_by_coord: Dictionary = {}
 var chunk_save_revisions: Dictionary = {}
+
+# Recently unloaded chunks keep their voxel data in a bounded RAM cache.
+# This makes backtracking use memory instead of disk or terrain generation.
+var chunk_data_cache: Dictionary = {}
+var chunk_data_cache_order: Array[Vector2i] = []
+
+# Chunk nodes are recycled instead of repeatedly instantiated/freed while
+# walking across boundaries. Releases are spread over several frames.
+var chunk_reuse_pool: Array[Chunk] = []
+var chunk_release_queue: Array[Chunk] = []
+var chunk_release_queued: Dictionary = {}
 
 
 # ===================================================================
@@ -1821,6 +1836,9 @@ func _process(delta: float) -> void:
 					"required_chunks": required_chunks.size(),
 					"load_queue": load_queue.size(),
 					"chunk_load_tasks": chunk_load_tasks.size(),
+					"cached_chunk_data": chunk_data_cache.size(),
+					"chunk_release_queue": chunk_release_queue.size(),
+					"chunk_reuse_pool": chunk_reuse_pool.size(),
 					"generation_queue": generation_queue.size(),
 					"critical_generation_queue": critical_generation_queue.size(),
 					"generation_tasks": generation_tasks.size(),
@@ -1851,6 +1869,13 @@ func _process(delta: float) -> void:
 	process_pending_chunk_saves()
 	PerformanceProfiler.record_phase(
 		"world/process_pending_chunk_saves",
+		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
+	)
+
+	phase_start_usec = Time.get_ticks_usec()
+	process_deferred_chunk_releases()
+	PerformanceProfiler.record_phase(
+		"world/process_deferred_chunk_releases",
 		float(Time.get_ticks_usec() - phase_start_usec) / 1000.0
 	)
 
@@ -1938,6 +1963,9 @@ func _process(delta: float) -> void:
 		"mesh_tasks": mesh_tasks.size(),
 		"load_queue": load_queue.size(),
 		"chunk_load_tasks": chunk_load_tasks.size(),
+		"cached_chunk_data": chunk_data_cache.size(),
+		"chunk_release_queue": chunk_release_queue.size(),
+		"chunk_reuse_pool": chunk_reuse_pool.size(),
 		"generation_queue": generation_queue.size(),
 		"critical_mesh_queue": critical_mesh_queue.size(),
 		"near_mesh_queue": near_mesh_queue.size(),
@@ -3006,6 +3034,77 @@ func _compare_completed_chunk_load_tasks(
 	return first_score > second_score
 
 
+func _cache_unloaded_chunk_data(
+	chunk_coord: Vector2i,
+	blocks: PackedByteArray
+) -> void:
+	if max_cached_chunk_data <= 0:
+		return
+
+	chunk_data_cache[chunk_coord] = blocks
+	chunk_data_cache_order.erase(chunk_coord)
+	chunk_data_cache_order.append(chunk_coord)
+
+	while chunk_data_cache_order.size() > max_cached_chunk_data:
+		var evicted_coord: Vector2i = chunk_data_cache_order.pop_front()
+		chunk_data_cache.erase(evicted_coord)
+
+
+func _take_cached_chunk_data(
+	chunk_coord: Vector2i
+) -> PackedByteArray:
+	if not chunk_data_cache.has(chunk_coord):
+		return PackedByteArray()
+
+	var blocks: PackedByteArray = chunk_data_cache[chunk_coord]
+	chunk_data_cache.erase(chunk_coord)
+	chunk_data_cache_order.erase(chunk_coord)
+	return blocks
+
+
+func process_deferred_chunk_releases() -> void:
+	var release_limit: int = maxi(
+		1,
+		chunk_release_per_frame
+	)
+	var released_count: int = 0
+	var start_usec: int = Time.get_ticks_usec()
+
+	while (
+		released_count < release_limit
+		and not chunk_release_queue.is_empty()
+	):
+		if (
+			released_count > 0
+			and chunk_release_budget_ms > 0.0
+			and float(
+				Time.get_ticks_usec() - start_usec
+			) / 1000.0 >= chunk_release_budget_ms
+		):
+			break
+
+		var chunk: Chunk = chunk_release_queue.pop_front()
+		var coord: Vector2i = chunk.chunk_coordinate
+
+		if chunk_release_queued.get(coord, null) == chunk:
+			chunk_release_queued.erase(coord)
+
+		if not is_instance_valid(chunk):
+			released_count += 1
+			continue
+
+		if chunk.is_inside_tree():
+			remove_child(chunk)
+
+		if chunk_reuse_pool.size() < maxi(0, chunk_reuse_pool_limit):
+			chunk.reset_for_reuse()
+			chunk_reuse_pool.append(chunk)
+		else:
+			chunk.queue_free()
+
+		released_count += 1
+
+
 func process_load_queue() -> void:
 
 	# Gameplay chunk loading is deliberately two-stage: disk I/O happens on
@@ -3112,6 +3211,12 @@ func process_load_queue() -> void:
 			blocks_to_apply = pending_chunk_saves[
 				result.chunk_coordinate
 			]
+		elif chunk_data_cache.has(result.chunk_coordinate):
+			# RAM cache is newer than disk whenever a previously unloaded
+			# chunk is encountered again during the same session.
+			blocks_to_apply = _take_cached_chunk_data(
+				result.chunk_coordinate
+			)
 
 		var chunk_apply_start_usec := Time.get_ticks_usec()
 		load_chunk(
@@ -3163,6 +3268,30 @@ func process_load_queue() -> void:
 			load_chunk(
 				chunk_coord,
 				pending_chunk_saves[chunk_coord]
+			)
+			applied_count += 1
+			continue
+
+		# Re-entry into a recently unloaded chunk uses the RAM snapshot first.
+		# This avoids both disk I/O and terrain regeneration on backtracking.
+		if chunk_data_cache.has(chunk_coord):
+			if (
+				applied_count >= apply_limit
+				or (
+					applied_count > 0
+					and apply_budget_ms > 0.0
+					and float(
+						Time.get_ticks_usec() - apply_start_usec
+					) / 1000.0 >= apply_budget_ms
+				)
+			):
+				load_queue.push_front(chunk_coord)
+				load_queued[chunk_coord] = true
+				break
+
+			load_chunk(
+				chunk_coord,
+				_take_cached_chunk_data(chunk_coord)
 			)
 			applied_count += 1
 			continue
@@ -3257,7 +3386,12 @@ func load_chunk(
 	saved_blocks: PackedByteArray = PackedByteArray()
 ) -> void:
 
-	var chunk = chunk_scene.instantiate()
+	var chunk: Chunk
+	if not chunk_reuse_pool.is_empty():
+		chunk = chunk_reuse_pool.pop_back()
+		chunk.reset_for_reuse()
+	else:
+		chunk = chunk_scene.instantiate()
 	chunk.set_generation_stage(
 		Chunk.GenerationStage.LOADING
 	)
@@ -4567,6 +4701,19 @@ func unload_chunk(
 	if render_regions != null:
 		render_regions.remove_chunk(chunk_coord)
 
+	# Hide the chunk immediately so a deferred release cannot keep rendering
+	# outside the active window. Its collision is also removed immediately.
+	chunk.visible = false
+	chunk.clear_collision()
+
+	# Keep the latest voxel snapshot in RAM. The persistence queue still writes
+	# it to disk, so this is an acceleration cache rather than a replacement for
+	# the save system.
+	_cache_unloaded_chunk_data(
+		chunk_coord,
+		chunk.blocks
+	)
+
 	loaded_chunks.erase(
 		chunk_coord
 	)
@@ -4607,7 +4754,9 @@ func unload_chunk(
 		chunk_coord
 	)
 
-	chunk.queue_free()
+	if not chunk_release_queued.has(chunk_coord):
+		chunk_release_queue.append(chunk)
+		chunk_release_queued[chunk_coord] = chunk
 
 
 # ===================================================================
@@ -5162,6 +5311,17 @@ func _save_all_loaded_generated_chunks() -> void:
 
 
 func _exit_tree() -> void:
+
+	for chunk in chunk_release_queue:
+		if is_instance_valid(chunk):
+			chunk.queue_free()
+	chunk_release_queue.clear()
+	chunk_release_queued.clear()
+
+	for chunk in chunk_reuse_pool:
+		if is_instance_valid(chunk):
+			chunk.queue_free()
+	chunk_reuse_pool.clear()
 
 	for task_id in chunk_load_tasks:
 		WorkerThreadPool.wait_for_task_completion(task_id)
