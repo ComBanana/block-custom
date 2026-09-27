@@ -1408,6 +1408,18 @@ func _create_celestial_bodies() -> void:
 
 	if sun_light != null:
 		sun_light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+		# Default 100m shadow range cuts off mountain casters in large worlds.
+		# Four blended splits keep near-block detail while covering terrain.
+		sun_light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun_light.directional_shadow_max_distance = 320.0
+		sun_light.directional_shadow_split_1 = 0.06
+		sun_light.directional_shadow_split_2 = 0.18
+		sun_light.directional_shadow_split_3 = 0.45
+		sun_light.directional_shadow_blend_splits = true
+		sun_light.directional_shadow_fade_start = 0.9
+		# Avoid clipping tall, unsplit terrain geometry against the
+		# shadow frustum's near-plane pancake.
+		sun_light.directional_shadow_pancake_size = 0.0
 		sun_light.shadow_enabled = GameSettings.light_shaders_enabled
 
 	moon_light = DirectionalLight3D.new()
