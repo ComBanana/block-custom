@@ -988,15 +988,16 @@ func process_water_tick() -> void:
 
 	var processed: int = 0
 	var budget_start_usec := Time.get_ticks_usec()
-	var tick_budget_ms: float = water_budget_ms
+	var tick_budget_ms: float = maxf(
+		water_budget_ms,
+		0.0
+	)
 
 	if water_frame_budget_ms > 0.0:
 		tick_budget_ms = minf(
 			tick_budget_ms,
 			water_frame_budget_remaining_ms
 		)
-	else:
-		tick_budget_ms = 0.0
 
 	if tick_budget_ms <= 0.0:
 		PerformanceProfiler.record_water_tick(0)
@@ -1046,9 +1047,10 @@ func process_water_tick() -> void:
 	var elapsed_ms := float(
 		Time.get_ticks_usec() - budget_start_usec
 	) / 1000.0
-	water_frame_budget_remaining_ms = maxf(
-		0.0,
-		water_frame_budget_remaining_ms - elapsed_ms
+	if water_frame_budget_ms > 0.0:
+		water_frame_budget_remaining_ms = maxf(
+			0.0,
+			water_frame_budget_remaining_ms - elapsed_ms
 	)
 
 	PerformanceProfiler.record_water_tick(processed)
@@ -2976,6 +2978,32 @@ func update_chunks(
 # Chunk loading
 # ===================================================================
 
+func _compare_completed_chunk_load_tasks(
+	first_id: int,
+	second_id: int
+) -> bool:
+	if not chunk_load_tasks.has(first_id):
+		return false
+
+	if not chunk_load_tasks.has(second_id):
+		return true
+
+	var first_result: ChunkLoadResult = chunk_load_tasks[first_id]
+	var second_result: ChunkLoadResult = chunk_load_tasks[second_id]
+
+	var first_score := _chunk_stream_score(
+		first_result.chunk_coordinate
+	)
+	var second_score := _chunk_stream_score(
+		second_result.chunk_coordinate
+	)
+
+	if is_equal_approx(first_score, second_score):
+		return first_id < second_id
+
+	return first_score > second_score
+
+
 func process_load_queue() -> void:
 
 	# Gameplay chunk loading is deliberately two-stage: disk I/O happens on
@@ -2984,11 +3012,27 @@ func process_load_queue() -> void:
 	# because the player is still blocked behind the loading screen.
 	var apply_limit: int = gameplay_chunk_load_apply_limit
 	var apply_budget_ms: float = gameplay_chunk_load_budget_ms
-	var max_in_flight: int = max_chunk_load_tasks
+	var submit_limit: int = maxi(
+		1,
+		chunks_loaded_per_frame
+	)
+	var max_in_flight: int = maxi(
+		1,
+		max_chunk_load_tasks
+	)
 
 	if not player_spawned:
 		apply_limit = loading_chunk_load_apply_limit
 		apply_budget_ms = loading_chunk_load_budget_ms
+		submit_limit = maxi(
+			submit_limit,
+			loading_chunks_per_frame
+		)
+
+	max_in_flight = mini(
+		max_in_flight,
+		submit_limit
+	)
 
 	# ---------------------------------------------------------------
 	# APPLY COMPLETED DISK READS
@@ -2998,6 +3042,11 @@ func process_load_queue() -> void:
 	for task_id in chunk_load_tasks:
 		if WorkerThreadPool.is_task_completed(task_id):
 			completed_tasks.append(task_id)
+
+	if completed_tasks.size() > 1:
+		completed_tasks.sort_custom(
+			_compare_completed_chunk_load_tasks
+		)
 
 	var apply_start_usec := Time.get_ticks_usec()
 	var applied_count: int = 0
@@ -3061,10 +3110,25 @@ func process_load_queue() -> void:
 		# A deferred unload save is already in memory and is newer than disk.
 		# Avoid scheduling an unnecessary disk read and apply it directly.
 		if pending_chunk_saves.has(chunk_coord):
+			if (
+				applied_count >= apply_limit
+				or (
+					applied_count > 0
+					and apply_budget_ms > 0.0
+					and float(
+						Time.get_ticks_usec() - apply_start_usec
+					) / 1000.0 >= apply_budget_ms
+				)
+			):
+				load_queue.push_front(chunk_coord)
+				load_queued[chunk_coord] = true
+				break
+
 			load_chunk(
 				chunk_coord,
 				pending_chunk_saves[chunk_coord]
 			)
+			applied_count += 1
 			continue
 
 		if chunk_load_tasks_by_coord.has(chunk_coord):
