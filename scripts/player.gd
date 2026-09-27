@@ -847,6 +847,9 @@ func _physics_process(delta: float) -> void:
 	# This is a final safety net for chunk remesh/unload races while streaming.
 	if controls_enabled:
 		var physics_chunk: Vector2i = world.world_to_chunk(global_position)
+		if not world.ensure_player_collision_ready(global_position):
+			velocity = Vector3.ZERO
+			return
 		if not world.can_player_enter_chunk(physics_chunk):
 			velocity = Vector3.ZERO
 			return
