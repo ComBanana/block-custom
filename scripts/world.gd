@@ -4192,7 +4192,11 @@ func process_far_chunk_compression() -> void:
 			processed += 1
 			continue
 
-		if dirty_chunks.has(chunk_coord):
+		if (
+			dirty_chunks.has(chunk_coord)
+			or generated_cache_pending.has(chunk_coord)
+			or pending_chunk_saves.has(chunk_coord)
+		):
 			processed += 1
 			continue
 
@@ -4871,6 +4875,24 @@ func process_pending_chunk_saves() -> void:
 				and loaded_chunk.mesh_data_revision == saved_revision
 			):
 				dirty_chunks.erase(chunk_coord)
+
+		if (
+			loaded_chunks.has(chunk_coord)
+			and render_regions != null
+		):
+			var loaded_chunk_for_compression = loaded_chunks[chunk_coord]
+			var distance_from_player := max(
+				abs(chunk_coord.x - player_chunk.x),
+				abs(chunk_coord.y - player_chunk.y)
+			)
+			if (
+				loaded_chunk_for_compression.is_generated
+				and render_regions.is_chunk_batched(chunk_coord)
+				and distance_from_player >= far_chunk_compression_distance
+				and not far_chunk_compression_queued.has(chunk_coord)
+			):
+				far_chunk_compression_queue.append(chunk_coord)
+				far_chunk_compression_queued[chunk_coord] = true
 
 		saved_count += 1
 
