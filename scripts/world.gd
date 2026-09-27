@@ -5096,7 +5096,7 @@ func save_world() -> void:
 		return
 
 	# Queue dirty and newly generated chunks instead of writing them all on
-	# the calling frame. The normal save worker below drains this gradually.
+	# the calling frame. The persistence worker drains these incrementally.
 	var save_candidates: Dictionary = {}
 
 	for chunk_coord in dirty_chunks:
@@ -5133,9 +5133,7 @@ func save_before_exit() -> void:
 
 	exit_save_in_progress = true
 
-	# Build the final persistence queue while gameplay is paused. This
-	# snapshots only chunks that are dirty, newly generated, or already
-	# waiting to be saved from an unload.
+	# Build the final persistence queue while gameplay is paused.
 	save_world()
 
 	var save_coordinates: Array[Vector2i] = []
@@ -5151,12 +5149,12 @@ func save_before_exit() -> void:
 	while cursor < save_coordinates.size():
 		var frame_start_usec: int = Time.get_ticks_usec()
 		var frame_saved: int = 0
+		var frame_limit: int = 64
 
 		while cursor < save_coordinates.size():
 			if (
 				frame_saved > 0
-				and chunk_cache_saves_per_frame > 0
-				and frame_saved >= chunk_cache_saves_per_frame
+				and frame_saved >= frame_limit
 			):
 				break
 
@@ -5164,7 +5162,7 @@ func save_before_exit() -> void:
 				Time.get_ticks_usec() - frame_start_usec
 			) / 1000.0
 
-			if frame_saved > 0 and elapsed_ms >= 4.0:
+			if frame_saved > 0 and elapsed_ms >= 6.0:
 				break
 
 			var chunk_coord: Vector2i = save_coordinates[cursor]
@@ -5192,8 +5190,8 @@ func save_before_exit() -> void:
 		saving_progress.emit(completed, total)
 
 		if cursor < save_coordinates.size():
-			# process_always=true keeps the timer alive while the game is
-			# paused behind the saving screen.
+			# process_always=true keeps the timer active while the game
+			# is paused behind the saving screen.
 			await get_tree().create_timer(
 				0.0,
 				true
@@ -5216,8 +5214,7 @@ func save_before_exit() -> void:
 
 
 func finish_exit_cleanup() -> void:
-	# Keep the saving screen visible while background workers finish so
-	# scene destruction never hides the UI before cleanup is complete.
+	# Keep the saving screen visible while worker tasks finish.
 	while (
 		not generation_tasks.is_empty()
 		or not mesh_tasks.is_empty()
