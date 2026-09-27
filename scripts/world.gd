@@ -4955,7 +4955,7 @@ func unload_chunk(
 		if chunk.is_generated:
 			_queue_chunk_save(
 				chunk_coord,
-				chunk.blocks,
+				chunk.get_blocks_snapshot(),
 				chunk.mesh_data_revision
 			)
 		generated_cache_pending.erase(chunk_coord)
@@ -4975,7 +4975,7 @@ func unload_chunk(
 	if chunk.is_generated:
 		_cache_unloaded_chunk_data(
 			chunk_coord,
-			chunk.blocks
+			chunk.get_blocks_snapshot()
 		)
 
 	loaded_chunks.erase(
