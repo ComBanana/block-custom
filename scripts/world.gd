@@ -497,8 +497,8 @@ func _water_set_quiet(
 	block_position: Vector3i,
 	block_id: int
 ) -> bool:
-	# Batch fluid writes skip per-voxel scheduling. The caller wakes only
-	# the final frontier after the batch completes.
+	# Batch fluid writes avoid scheduling the changed water cell itself.
+	# The changed voxel still wakes its six neighboring water cells.
 	if _water_get(block_position) == block_id:
 		return false
 
@@ -1137,8 +1137,8 @@ func _water_cell_has_open_destination(
 
 
 func enqueue_water_updates_for_chunk(
-	chunk_coord: Vector2i,
-	restore_saved_flow: bool = false
+	_chunk_coord: Vector2i,
+	_restore_saved_flow: bool = false
 ) -> void:
 	# Kept as a compatibility stub for older callers. Water is no longer
 	# bulk-scheduled when chunks load or generate; only block changes wake
