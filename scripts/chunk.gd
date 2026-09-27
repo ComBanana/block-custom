@@ -3,6 +3,8 @@ class_name Chunk
 
 const CHUNK_SIZE: int = 16
 const CHUNK_HEIGHT: int = 256
+const CHUNK_VOLUME: int = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE
+const CHUNK_COMPRESSION_MODE: int = 0
 
 const AIR: int = 0
 const GRASS: int = 1
@@ -133,7 +135,7 @@ func _ensure_blocks_resident() -> void:
 
 	var restored := compressed_blocks.decompress(
 		CHUNK_VOLUME,
-		CompressionMode.COMPRESSION_FASTLZ
+		CHUNK_COMPRESSION_MODE
 	)
 
 	if restored.size() != CHUNK_VOLUME:
@@ -155,7 +157,7 @@ func compress_blocks_for_far_storage() -> bool:
 		return false
 
 	var compressed := blocks.compress(
-		CompressionMode.COMPRESSION_FASTLZ
+		CHUNK_COMPRESSION_MODE
 	)
 
 	# Only replace the raw buffer when compression actually saves space.
