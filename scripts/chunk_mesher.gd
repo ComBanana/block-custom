@@ -156,12 +156,14 @@ class MeshBuffer:
 		v2: Vector3,
 		v3: Vector3
 	) -> void:
+		# Match the outward winding used by the voxel face normals. This is
+		# especially important for Jolt's concave trimesh collision.
 		collision_faces.append(v0)
+		collision_faces.append(v2)
 		collision_faces.append(v1)
-		collision_faces.append(v2)
 		collision_faces.append(v0)
-		collision_faces.append(v2)
 		collision_faces.append(v3)
+		collision_faces.append(v2)
 
 
 static func chunk_index(x: int, y: int, z: int) -> int:
