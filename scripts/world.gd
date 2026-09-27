@@ -4060,9 +4060,15 @@ func _loading_mesh_neighbors_ready(
 	for offset: Vector2i in offsets:
 		var neighbor_coord := chunk_coord + offset
 
-		# A neighbor outside the active render area will be treated as
-		# air by the mesher, so it cannot invalidate this mesh later.
 		if not required_chunks.has(neighbor_coord):
+			continue
+
+		# During startup, only the bootstrap area is guaranteed to be
+		# generated. Do not make a startup mesh wait forever for a neighbor
+		# outside that area; the mesher treats an unloaded neighbor as air,
+		# and enqueue_neighbor_meshes() refreshes the border once that
+		# neighbor is generated later.
+		if not player_spawned and not _is_startup_chunk(neighbor_coord):
 			continue
 
 		if not loaded_chunks.has(neighbor_coord):
