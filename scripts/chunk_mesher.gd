@@ -989,10 +989,3 @@ static func _add_face(
 		uv_rotation_steps
 	)
 
-	if include_collision:
-		buffer.add_collision_quad(
-			v0,
-			v1,
-			v2,
-			v3
-		)
