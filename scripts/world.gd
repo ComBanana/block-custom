@@ -25,7 +25,7 @@ const INVALID_CHUNK := Vector2i(999999, 999999)
 const GAME_TICKS_PER_SECOND: int = 20
 const GAME_TICK_INTERVAL: float = 1.0 / float(GAME_TICKS_PER_SECOND)
 const MAX_GAME_TICKS_PER_FRAME: int = 5
-const DEFAULT_WATER_TICK_DELAY: int = 5
+const DEFAULT_WATER_TICK_DELAY: int = 1
 
 const WATER_ADJACENT_OFFSETS: Array[Vector3i] = [
 	Vector3i(0, -1, 0),
@@ -105,7 +105,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export_range(1, 20, 1) var water_tick_delay: int = DEFAULT_WATER_TICK_DELAY
 @export var water_budget_ms: float = 2.0
 @export var water_frame_budget_ms: float = 2.5
-@export var water_falling_blocks_per_update: int = 8
+@export var water_falling_blocks_per_update: int = 16
 
 
 var terrain_noise := FastNoiseLite.new()
