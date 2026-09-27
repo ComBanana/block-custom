@@ -75,6 +75,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var max_chunk_load_tasks: int = 4
 @export var gameplay_chunk_load_apply_limit: int = 3
 @export var gameplay_chunk_load_budget_ms: float = 1.25
+@export var load_scheduler_scan_limit: int = 128
 @export var max_generation_tasks: int = 8
 @export var max_mesh_tasks: int = 6
 @export var mesh_columns_per_frame: int = 16
@@ -3328,6 +3329,67 @@ func process_deferred_chunk_releases() -> void:
 		released_count += 1
 
 
+func _take_best_load_candidate() -> Vector2i:
+	if load_queue.is_empty():
+		return INVALID_CHUNK
+
+	var best_index := -1
+	var best_score: float = -INF
+	var scan_limit: int = maxi(
+		1,
+		load_scheduler_scan_limit
+	)
+
+	# During startup, the far render-distance queue is intentionally behind
+	# the bootstrap queue. Only scan the startup portion so this scheduler
+	# cannot skip ahead and consume I/O with distant chunks.
+	if not player_spawned:
+		scan_limit = mini(
+			scan_limit,
+			_get_startup_load_radius() * 2 + 1
+		)
+		scan_limit = maxi(
+			scan_limit * scan_limit,
+			mini(load_queue.size(), 64)
+		)
+
+	var scan_count: int = mini(
+		load_queue.size(),
+		scan_limit
+	)
+
+	for index in range(scan_count):
+		var coord: Vector2i = load_queue[index]
+
+		if not load_queued.has(coord):
+			continue
+
+		if not _is_chunk_needed(coord):
+			continue
+
+		if loaded_chunks.has(coord):
+			continue
+
+		if (
+			not player_spawned
+			and not _is_startup_chunk(coord)
+		):
+			continue
+
+		var score := _chunk_stream_score(coord)
+		if score > best_score:
+			best_score = score
+			best_index = index
+
+	if best_index == -1:
+		return INVALID_CHUNK
+
+	var selected: Vector2i = load_queue[best_index]
+	load_queue.remove_at(best_index)
+	load_queued.erase(selected)
+	return selected
+
+
 func process_load_queue() -> void:
 
 	# Gameplay chunk loading is deliberately two-stage: disk I/O happens on
@@ -3462,17 +3524,9 @@ func process_load_queue() -> void:
 		chunk_load_tasks.size() < max_in_flight
 		and not load_queue.is_empty()
 	):
-		var chunk_coord: Vector2i = load_queue[0]
-
-		# Before gameplay, never let the far render-distance queue jump ahead
-		# of the bootstrap area. This makes startup truly local: saved chunks
-		# around the player first, missing local chunks second, everything else
-		# after gameplay begins.
-		if not player_spawned and not _is_startup_chunk(chunk_coord):
+		var chunk_coord := _take_best_load_candidate()
+		if chunk_coord == INVALID_CHUNK:
 			break
-
-		load_queue.pop_front()
-		load_queued.erase(chunk_coord)
 
 		if not _is_chunk_needed(chunk_coord):
 			continue
