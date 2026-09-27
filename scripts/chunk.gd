@@ -77,6 +77,37 @@ var collision_faces := PackedVector3Array()
 var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 
 
+func reset_for_reuse() -> void:
+	# Reset all runtime state before assigning a new chunk coordinate.
+	# This method is called only while the node is outside the active scene tree.
+	mesh_job_id += 1
+
+	$ChunkMesh.mesh = null
+	$WaterMesh.mesh = null
+	$ChunkCollision/CollisionShape.shape = null
+
+	blocks = PackedByteArray()
+	chunk_coordinate = Vector2i.ZERO
+
+	generation_passes_done = false
+	mesh_ready = false
+	collision_ready = false
+	generation_stage = GenerationStage.UNLOADED
+
+	is_generated = false
+	terrain_generating = false
+	mesh_building = false
+	mesh_rebuild_requested = false
+	water_mesh_rebuild_requested = false
+
+	terrain_x = 0
+	mesh_x = 0
+	mesh_data_revision += 1
+	collision_faces = PackedVector3Array()
+	mesh_max_y_exclusive = 1
+	visible = true
+
+
 func set_generation_stage(stage: GenerationStage) -> void:
 	generation_stage = stage
 
