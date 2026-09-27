@@ -1362,10 +1362,14 @@ func _ready() -> void:
 		player.global_position
 	)
 
-	update_chunks()
-
+	# Set the render-region center before registering any chunks. This is
+	# important for saved worlds whose player starts far from world origin:
+	# newly loaded chunks must be classified as near/far against the actual
+	# player position immediately.
 	if render_regions != null:
 		render_regions.update_center(player_chunk)
+
+	update_chunks()
 
 
 func _apply_fog_settings() -> void:
@@ -3879,6 +3883,17 @@ func process_generation_queue() -> void:
 
 		if render_regions != null:
 			render_regions.mark_chunk_dirty(chunk_coord)
+
+		# A chunk can finish generation after the batching boundary was
+		# established. Ensure the scene-tree representation catches up with
+		# the current near/far classification instead of leaving a near chunk
+		# permanently data-only.
+		if (
+			render_regions == null
+			or not render_regions.is_chunk_batched(chunk_coord)
+		):
+			if not chunk.is_inside_tree():
+				add_child(chunk)
 
 		# Generated chunks become part of the persistent world cache.
 		# Keep this separate from edit dirtiness so periodic autosaves do
