@@ -46,6 +46,9 @@ const WATER_TEXTURE := preload("res://textures/water.png")
 var blocks := PackedByteArray()
 
 var chunk_coordinate := Vector2i.ZERO
+# Explicit world reference lets generated/loaded chunks remain out of the
+# SceneTree while far render regions represent them visually.
+var world
 
 var terrain_noise: FastNoiseLite
 var hill_noise: FastNoiseLite
@@ -608,9 +611,11 @@ func _get_block_for_generation(
 	if y < 0 or y >= CHUNK_HEIGHT:
 		return AIR
 
-	var world = get_parent()
+	var world_node = world
+	if world_node == null:
+		world_node = get_parent()
 
-	if world == null:
+	if world_node == null:
 		return AIR
 
 	var neighbor_coordinate := chunk_coordinate
@@ -634,12 +639,12 @@ func _get_block_for_generation(
 		neighbor_coordinate.y += 1
 		neighbor_z -= CHUNK_SIZE
 
-	if not world.loaded_chunks.has(
+	if not world_node.loaded_chunks.has(
 		neighbor_coordinate
 	):
 		return AIR
 
-	var neighbor = world.loaded_chunks[
+	var neighbor = world_node.loaded_chunks[
 		neighbor_coordinate
 	]
 
@@ -894,9 +899,11 @@ func get_block_for_mesh(
 	if y < 0 or y >= CHUNK_HEIGHT:
 		return AIR
 
-	var world = get_parent()
+	var world_node = world
+	if world_node == null:
+		world_node = get_parent()
 
-	if world == null:
+	if world_node == null:
 		return AIR
 
 	var neighbor_coordinate := chunk_coordinate
@@ -920,12 +927,12 @@ func get_block_for_mesh(
 		neighbor_coordinate.y += 1
 		neighbor_z -= CHUNK_SIZE
 
-	if not world.loaded_chunks.has(
+	if not world_node.loaded_chunks.has(
 		neighbor_coordinate
 	):
 		return AIR
 
-	var neighbor = world.loaded_chunks[
+	var neighbor = world_node.loaded_chunks[
 		neighbor_coordinate
 	]
 
