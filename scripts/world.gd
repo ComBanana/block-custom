@@ -74,6 +74,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var gameplay_mesh_refill_per_frame: int = 3
 @export var collisions_per_frame: int = 2
 @export var critical_chunk_distance: int = 3
+@export var block_updates_per_tick: int = 2
 @export var max_cached_chunk_data: int = 256
 @export var chunk_release_per_frame: int = 8
 @export var chunk_release_budget_ms: float = 0.8
@@ -157,6 +158,7 @@ class ChunkLoadResult:
 class MeshResult:
 	var chunk_coordinate: Vector2i
 	var job_id: int = 0
+	var water_only: bool = false
 	var data_revision: int = 0
 	var mesh_max_y_exclusive: int = CHUNK_HEIGHT
 	var capture_ms: float = 0.0
@@ -458,6 +460,25 @@ func _water_mark_mesh_dirty(
 		] = true
 
 
+func _water_invalidate_cache_around(
+	block_position: Vector3i
+) -> void:
+	# A water mutation only changes the answer for this voxel and its six
+	# directly adjacent neighbors. Keep the rest of the tick cache intact.
+	var offsets: Array[Vector3i] = [
+		Vector3i.ZERO,
+		Vector3i(0, -1, 0),
+		Vector3i(0, 1, 0),
+		Vector3i(-1, 0, 0),
+		Vector3i(1, 0, 0),
+		Vector3i(0, 0, -1),
+		Vector3i(0, 0, 1)
+	]
+
+	for offset: Vector3i in offsets:
+		water_block_cache.erase(block_position + offset)
+
+
 func _water_set_quiet(
 	block_position: Vector3i,
 	block_id: int
@@ -480,7 +501,7 @@ func _water_set_quiet(
 		false
 	)
 
-	water_block_cache.erase(block_position)
+	_water_invalidate_cache_around(block_position)
 
 	if _water_get(block_position) != block_id:
 		return false
@@ -509,8 +530,8 @@ func _water_set(
 		false
 	)
 
-	# The cached block state is now stale because this block_position changed.
-	water_block_cache.clear()
+	# The cached block state and its directly affected neighbors are stale.
+	_water_invalidate_cache_around(block_position)
 
 	# A failed write means the destination chunk is not currently loaded.
 	if _water_get(block_position) != block_id:
@@ -1221,6 +1242,7 @@ var generated_cache_pending: Dictionary = {}
 var pending_chunk_save_queue: Array[Vector2i] = []
 var pending_chunk_save_head: int = 0
 var pending_chunk_saves: Dictionary = {}
+var pending_chunk_save_revisions: Dictionary = {}
 var save_accumulator: float = 0.0
 const SAVE_INTERVAL: float = 15.0
 
@@ -2000,8 +2022,15 @@ func queue_player_block_update(
 func process_block_update_tick() -> void:
 	var tick_queue_end: int = pending_block_updates.size()
 	var processed: int = 0
+	var limit: int = maxi(
+		1,
+		block_updates_per_tick
+	)
 
-	while processed < tick_queue_end:
+	while (
+		processed < tick_queue_end
+		and processed < limit
+	):
 		if pending_block_updates.is_empty():
 			return
 
@@ -2436,8 +2465,7 @@ func is_chunk_ready_for_player(
 
 	return (
 		chunk.is_generated
-		and chunk.mesh_ready
-		and chunk.collision_ready
+		and chunk.collision_available
 	)
 
 
@@ -4065,8 +4093,10 @@ func enqueue_player_edit(
 	if chunk.mesh_building:
 		chunk.cancel_mesh_build()
 
-	# Old mesh no longer represents the block data.
-	chunk.mesh_ready = false
+	# Keep the current visual mesh visible while the replacement is built.
+	# The old collision shape also remains available until the replacement
+	# collision is ready.
+	chunk.collision_ready = false
 
 	# Remove its logical queue state.
 	near_mesh_queued.erase(
@@ -4145,7 +4175,9 @@ func _build_mesh_worker(
 		result.neg_z_blocks,
 		result.pos_z_blocks,
 		result.chunk_coordinate,
-		result.mesh_max_y_exclusive
+		result.mesh_max_y_exclusive,
+		not result.water_only,
+		result.water_only
 	)
 	result.mesh_ms = float(
 		Time.get_ticks_usec() - start_usec
@@ -4278,10 +4310,24 @@ func process_mesh_queue() -> void:
 			chunk.set_generation_stage(Chunk.GenerationStage.MESH_QUEUED)
 			chunk.mesh_rebuild_requested = false
 			chunk.water_mesh_rebuild_requested = false
-			enqueue_mesh_chunk(result.chunk_coordinate)
+			if result.water_only:
+				enqueue_water_mesh_chunk(
+					result.chunk_coordinate
+				)
+			else:
+				enqueue_mesh_chunk(
+					result.chunk_coordinate
+				)
 			continue
 
-		chunk.apply_mesh_buffer(result.buffer)
+		if result.water_only:
+			chunk.apply_water_mesh(
+				result.buffer.water
+			)
+		else:
+			chunk.apply_mesh_buffer(
+				result.buffer
+			)
 
 		if chunk.mesh_rebuild_requested:
 			chunk.mesh_rebuild_requested = false
@@ -4295,9 +4341,10 @@ func process_mesh_queue() -> void:
 			"mesh_apply",
 			float(Time.get_ticks_usec() - mesh_apply_start_usec) / 1000.0
 		)
-		enqueue_collision_chunk(
-			result.chunk_coordinate
-		)
+			if not result.water_only:
+			enqueue_collision_chunk(
+				result.chunk_coordinate
+			)
 		applied_count += 1
 
 	# ---------------------------------------------------------------
@@ -4346,8 +4393,8 @@ func process_mesh_queue() -> void:
 			continue
 
 		chunk.mesh_building = true
-		chunk.mesh_ready = false
-		chunk.collision_ready = false
+		# Existing meshes/collision remain visible/usable until the worker result
+		# is applied. Newly created chunks already have these flags false.
 		chunk.mesh_job_id += 1
 
 		var result := MeshResult.new()
@@ -4383,6 +4430,9 @@ func process_mesh_queue() -> void:
 		)
 
 		result.job_id = chunk.mesh_job_id
+		result.water_only = (
+			active_mesh_priority == PRIORITY_WATER
+		)
 		mesh_tasks[task_id] = result
 
 		if active_mesh_priority == PRIORITY_PLAYER:
@@ -4604,7 +4654,8 @@ func process_collision_queue() -> void:
 
 func _queue_chunk_save(
 	chunk_coord: Vector2i,
-	blocks: PackedByteArray
+	blocks: PackedByteArray,
+	data_revision: int = -1
 ) -> void:
 	var snapshot: PackedByteArray = blocks.duplicate()
 	chunk_save_revisions[chunk_coord] = int(
@@ -4612,9 +4663,13 @@ func _queue_chunk_save(
 	) + 1
 	if pending_chunk_saves.has(chunk_coord):
 		pending_chunk_saves[chunk_coord] = snapshot
+		if data_revision >= 0:
+			pending_chunk_save_revisions[chunk_coord] = data_revision
 		return
 
 	pending_chunk_saves[chunk_coord] = snapshot
+	if data_revision >= 0:
+		pending_chunk_save_revisions[chunk_coord] = data_revision
 	pending_chunk_save_queue.append(chunk_coord)
 
 
@@ -4654,6 +4709,26 @@ func process_pending_chunk_saves() -> void:
 
 		pending_chunk_saves.erase(chunk_coord)
 		generated_cache_pending.erase(chunk_coord)
+
+		var saved_revision: int = int(
+			pending_chunk_save_revisions.get(
+				chunk_coord,
+				-1
+			)
+		)
+		pending_chunk_save_revisions.erase(chunk_coord)
+
+		if (
+			saved_revision >= 0
+			and loaded_chunks.has(chunk_coord)
+		):
+			var loaded_chunk = loaded_chunks[chunk_coord]
+			if (
+				loaded_chunk.is_generated
+				and loaded_chunk.mesh_data_revision == saved_revision
+			):
+				dirty_chunks.erase(chunk_coord)
+
 		saved_count += 1
 
 	if (
@@ -4682,7 +4757,10 @@ func _flush_pending_chunk_saves() -> void:
 			pending_chunk_saves[chunk_coord]
 		)
 		pending_chunk_saves.erase(chunk_coord)
+		pending_chunk_save_revisions.erase(chunk_coord)
 		generated_cache_pending.erase(chunk_coord)
+		if loaded_chunks.has(chunk_coord):
+			dirty_chunks.erase(chunk_coord)
 
 	pending_chunk_save_queue.clear()
 	pending_chunk_save_head = 0
@@ -4712,7 +4790,8 @@ func unload_chunk(
 		if chunk.is_generated:
 			_queue_chunk_save(
 				chunk_coord,
-				chunk.blocks
+				chunk.blocks,
+				chunk.mesh_data_revision
 			)
 		generated_cache_pending.erase(chunk_coord)
 		dirty_chunks.erase(chunk_coord)
@@ -4980,11 +5059,34 @@ func get_statistics() -> Dictionary:
 	}
 
 
+func _update_world_metadata() -> void:
+	world_metadata["seed"] = world_seed
+	world_metadata["blocks_broken"] = blocks_broken
+	world_metadata["blocks_placed"] = blocks_placed
+	world_metadata["distance_travelled"] = distance_travelled
+	world_metadata["play_time_seconds"] = play_time_seconds
+	world_metadata["world_time_minutes"] = world_time_minutes
+
+	if player_spawned:
+		world_metadata["player_x"] = player.global_position.x
+		world_metadata["player_y"] = player.global_position.y
+		world_metadata["player_z"] = player.global_position.z
+		world_metadata["player_yaw"] = player.rotation.y
+		world_metadata["player_pitch"] = player.camera.rotation.x
+		world_metadata["player_state"] = player.get_persistent_state()
+
+
 func save_world() -> void:
 	if world_name == "":
 		return
 
+	# Autosave only snapshots changed/generated chunks. The actual disk writes
+	# are performed incrementally by process_pending_chunk_saves().
+	var dirty_keys: Array[Vector2i] = []
 	for chunk_coord in dirty_chunks:
+		dirty_keys.append(chunk_coord)
+
+	for chunk_coord in dirty_keys:
 		if not loaded_chunks.has(chunk_coord):
 			continue
 
@@ -4993,19 +5095,17 @@ func save_world() -> void:
 		if not chunk.is_generated:
 			continue
 
-		pending_chunk_saves.erase(chunk_coord)
-
-		WorldStore.save_chunk(
-			world_name,
+		_queue_chunk_save(
 			chunk_coord,
-			chunk.blocks
+			chunk.blocks,
+			chunk.mesh_data_revision
 		)
-		generated_cache_pending.erase(chunk_coord)
-		dirty_chunks.erase(chunk_coord)
 
-	dirty_chunks.clear()
-
-	world_metadata["seed"] = world_seed
+	_update_world_metadata()
+	WorldStore.save_metadata(
+		world_name,
+		world_metadata
+	)
 	world_metadata["blocks_broken"] = blocks_broken
 	world_metadata["blocks_placed"] = blocks_placed
 	world_metadata["distance_travelled"] = distance_travelled
