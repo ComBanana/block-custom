@@ -4342,59 +4342,27 @@ func update_collision_range(
 	var radius: int = maxi(0, collision_distance)
 	var changed: Dictionary = {}
 
-	if new_center.x > old_center.x:
-		for z in range(
-			new_center.y - radius,
-			new_center.y + radius + 1
-		):
-			changed[Vector2i(
-				new_center.x + radius,
-				z
-			)] = true
-			changed[Vector2i(
-				old_center.x - radius,
-				z
-			)] = true
-	elif new_center.x < old_center.x:
-		for z in range(
-			new_center.y - radius,
-			new_center.y + radius + 1
-		):
-			changed[Vector2i(
-				new_center.x - radius,
-				z
-			)] = true
-			changed[Vector2i(
-				old_center.x + radius,
-				z
-			)] = true
+	# Compare only the union of the old and new collision squares. This
+	# handles diagonal crossings and negative chunk coordinates correctly,
+	# without scanning the entire RD32 loaded-chunk dictionary.
+	var min_x := mini(old_center.x, new_center.x) - radius
+	var max_x := maxi(old_center.x, new_center.x) + radius
+	var min_z := mini(old_center.y, new_center.y) - radius
+	var max_z := maxi(old_center.y, new_center.y) + radius
 
-	if new_center.y > old_center.y:
-		for x in range(
-			new_center.x - radius,
-			new_center.x + radius + 1
-		):
-			changed[Vector2i(
-				x,
-				new_center.y + radius
-			)] = true
-			changed[Vector2i(
-				x,
-				old_center.y - radius
-			)] = true
-	elif new_center.y < old_center.y:
-		for x in range(
-			new_center.x - radius,
-			new_center.x + radius + 1
-		):
-			changed[Vector2i(
-				x,
-				new_center.y - radius
-			)] = true
-			changed[Vector2i(
-				x,
-				old_center.y + radius
-			)] = true
+	for x in range(min_x, max_x + 1):
+		for z in range(min_z, max_z + 1):
+			var was_near := (
+				abs(x - old_center.x) <= radius
+				and abs(z - old_center.y) <= radius
+			)
+			var is_near := (
+				abs(x - new_center.x) <= radius
+				and abs(z - new_center.y) <= radius
+			)
+
+			if was_near != is_near:
+				changed[Vector2i(x, z)] = true
 
 	for chunk_variant in changed.keys():
 		var chunk_coord: Vector2i = chunk_variant
