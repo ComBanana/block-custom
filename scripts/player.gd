@@ -777,6 +777,49 @@ func get_swim_direction(input_vector: Vector2) -> Vector3:
 	return direction
 
 
+func _is_horizontal_movement_path_ready(
+	direction: Vector3,
+	delta: float
+) -> bool:
+	if direction.length_squared() <= 0.0001:
+		return true
+
+	var horizontal_direction: Vector3 = Vector3(
+		direction.x,
+		0.0,
+		direction.z
+	).normalized()
+
+	# Check the full distance the player can travel during this physics step,
+	# plus the player's half-width. The old fixed 0.15-block probe could miss a
+	# chunk boundary during a long frame and let the player enter before that
+	# chunk had collision.
+	var max_step_distance: float = maxf(
+		0.5,
+		sprint_speed * maxf(delta, 0.0) + 0.4
+	)
+
+	# Sample the path in quarter-block increments so a long frame cannot jump
+	# across an unready chunk without being checked.
+	var sample_count: int = maxi(
+		1,
+		ceili(max_step_distance / 0.25)
+	)
+
+	for sample_index in range(1, sample_count + 1):
+		var fraction: float = float(sample_index) / float(sample_count)
+		var sample_position: Vector3 = (
+			global_position
+			+ horizontal_direction * max_step_distance * fraction
+		)
+		var sample_chunk: Vector2i = world.world_to_chunk(sample_position)
+
+		if not world.can_player_enter_chunk(sample_chunk):
+			return false
+
+	return true
+
+
 func _physics_process(delta: float) -> void:
 	# Never simulate movement inside a chunk whose terrain collision is not ready.
 	# This is a final safety net for chunk remesh/unload races while streaming.
@@ -926,36 +969,12 @@ func _physics_process(delta: float) -> void:
 	# Chunk entry safety
 	# ---------------------------------------------------------------
 
-	if direction != Vector3.ZERO:
-
-		var predicted_position: Vector3 = (
-			global_position +
-			direction * 0.15
-		)
-
-		var current_chunk: Vector2i = (
-			world.world_to_chunk(
-				global_position
-			)
-		)
-
-		var predicted_chunk: Vector2i = (
-			world.world_to_chunk(
-				predicted_position
-			)
-		)
-
-		if (
-			predicted_chunk != current_chunk
-			and not world.can_player_enter_chunk(
-				predicted_chunk
-			)
-		):
-			# Do not let inertia or gravity carry the player into an unready chunk.
-			# Stop the horizontal component immediately and wait for its collision.
-			direction = Vector3.ZERO
-			velocity.x = 0.0
-			velocity.z = 0.0
+	if not _is_horizontal_movement_path_ready(direction, delta):
+		# Do not let movement outrun collision streaming. Stop the horizontal
+		# component immediately and wait for every crossed chunk to be ready.
+		direction = Vector3.ZERO
+		velocity.x = 0.0
+		velocity.z = 0.0
 
 
 	# ---------------------------------------------------------------
