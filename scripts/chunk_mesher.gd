@@ -124,7 +124,10 @@ class MeshBuffer:
 	# texture from the material layer packed into UV.x.
 	var solid: MeshSurface = MeshSurface.new()
 	var water: MeshSurface = MeshSurface.new()
-	var collision_faces: PackedVector3Array = PackedVector3Array()
+	# Each pair is [center, size] for one primitive BoxShape3D.
+	# Collision is independent of render triangles so CharacterBody3D uses a
+	# filled voxel volume rather than a hollow ConcavePolygonShape3D.
+	var collision_boxes: PackedVector3Array = PackedVector3Array()
 
 	func surface_for_layer(layer: int) -> MeshSurface:
 		if layer == 5:
@@ -149,22 +152,6 @@ class MeshBuffer:
 			uv_rotation_steps,
 			layer
 		)
-
-	func add_collision_quad(
-		v0: Vector3,
-		v1: Vector3,
-		v2: Vector3,
-		v3: Vector3
-	) -> void:
-		# Match the outward winding used by the voxel face normals. This is
-		# especially important for Jolt's concave trimesh collision.
-		collision_faces.append(v0)
-		collision_faces.append(v2)
-		collision_faces.append(v1)
-		collision_faces.append(v0)
-		collision_faces.append(v3)
-		collision_faces.append(v2)
-
 
 static func chunk_index(x: int, y: int, z: int) -> int:
 	return x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE
@@ -386,6 +373,134 @@ static func _copy_z_border(
 			] = neighbor_blocks[source_index]
 
 
+static func _is_solid_block(block_id: int) -> bool:
+	return block_id != AIR and not is_water(block_id)
+
+
+static func _build_collision_boxes(
+	snapshot: PackedByteArray,
+	max_y_exclusive: int,
+	buffer: MeshBuffer
+) -> void:
+	# Exact 3D greedy decomposition of solid voxels into AABBs.
+	# The generated terrain is column-filled, but this also remains correct
+	# when player edits punch holes or create enclosed solid sections.
+	var used := PackedByteArray()
+	used.resize(CHUNK_VOLUME)
+	used.fill(0)
+
+	for y in range(max_y_exclusive):
+		for z in range(CHUNK_SIZE):
+			for x in range(CHUNK_SIZE):
+				var start_index := chunk_index(x, y, z)
+				if used[start_index] != 0:
+					continue
+
+				if not _is_solid_block(
+					snapshot[padded_index(x, y, z)]
+				):
+					continue
+
+				var width: int = 1
+				while x + width < CHUNK_SIZE:
+					var test_index := chunk_index(x + width, y, z)
+					if used[test_index] != 0:
+						break
+					if not _is_solid_block(
+						snapshot[padded_index(x + width, y, z)]
+					):
+						break
+					width += 1
+
+				var depth: int = 1
+				while z + depth < CHUNK_SIZE:
+					var test_z := z + depth
+					var fits_depth := true
+
+					for dx in range(width):
+						var test_index := chunk_index(
+							x + dx,
+							y,
+							test_z
+						)
+						if used[test_index] != 0:
+							fits_depth = false
+							break
+						if not _is_solid_block(
+							snapshot[
+								padded_index(
+									x + dx,
+									y,
+									test_z
+								)
+							]
+						):
+							fits_depth = false
+							break
+
+					if not fits_depth:
+						break
+					depth += 1
+
+				var height: int = 1
+				while y + height < max_y_exclusive:
+					var test_y := y + height
+					var fits_height := true
+
+					for dz in range(depth):
+						if not fits_height:
+							break
+						for dx in range(width):
+							var test_index := chunk_index(
+								x + dx,
+								test_y,
+								z + dz
+							)
+							if used[test_index] != 0:
+								fits_height = false
+								break
+							if not _is_solid_block(
+								snapshot[
+									padded_index(
+										x + dx,
+										test_y,
+										z + dz
+									)
+								]
+							):
+								fits_height = false
+								break
+
+					if not fits_height:
+						break
+					height += 1
+
+				for dy in range(height):
+					for dz in range(depth):
+						for dx in range(width):
+							used[
+								chunk_index(
+									x + dx,
+									y + dy,
+									z + dz
+								)
+							] = 1
+
+				var size := Vector3(
+					float(width),
+					float(height),
+					float(depth)
+				)
+				var center := Vector3(
+					float(x) + size.x * 0.5,
+					float(y) + size.y * 0.5,
+					float(z) + size.z * 0.5
+				)
+
+				buffer.collision_boxes.append(center)
+				buffer.collision_boxes.append(size)
+
+
 static func build(
 	snapshot: PackedByteArray,
 	chunk_coordinate: Vector2i = Vector2i.ZERO,
@@ -430,6 +545,13 @@ static func build(
 						chunk_coordinate,
 						include_collision
 					)
+
+	if include_collision:
+		_build_collision_boxes(
+			snapshot,
+			max_y_exclusive,
+			buffer
+		)
 
 	return buffer
 
