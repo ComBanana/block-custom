@@ -75,6 +75,11 @@ var mesh_job_id: int = 0
 # they captured so stale asynchronous results can never overwrite newer data.
 var mesh_data_revision: int = 0
 var collision_faces := PackedVector3Array()
+# Far chunks that are already represented by a render region do not need to
+# keep their full 64 KiB voxel buffer resident. The compressed copy is restored
+# automatically if the chunk becomes interactive again.
+var compressed_blocks := PackedByteArray()
+var blocks_compressed: bool = false
 # Highest non-air Y + 1. Most terrain occupies only the lower world height,
 # so the mesher can skip the empty upper part of the 256-block chunk.
 var mesh_max_y_exclusive: int = CHUNK_HEIGHT
@@ -90,6 +95,8 @@ func reset_for_reuse() -> void:
 	$ChunkCollision/CollisionShape.shape = null
 
 	blocks = PackedByteArray()
+	compressed_blocks = PackedByteArray()
+	blocks_compressed = false
 	chunk_coordinate = Vector2i.ZERO
 
 	generation_passes_done = false
@@ -120,7 +127,49 @@ func is_generation_stage_at_least(stage: GenerationStage) -> bool:
 	return generation_stage >= stage
 
 
+func _ensure_blocks_resident() -> void:
+	if not blocks_compressed:
+		return
+
+	var restored := compressed_blocks.decompress(
+		CHUNK_VOLUME,
+		CompressionMode.COMPRESSION_FASTLZ
+	)
+
+	if restored.size() != CHUNK_VOLUME:
+		push_error("Could not decompress chunk voxel data.")
+		return
+
+	blocks = restored
+	compressed_blocks = PackedByteArray()
+	blocks_compressed = false
+
+
+func get_blocks_snapshot() -> PackedByteArray:
+	_ensure_blocks_resident()
+	return blocks.duplicate()
+
+
+func compress_blocks_for_far_storage() -> bool:
+	if not is_generated or blocks_compressed or blocks.is_empty():
+		return false
+
+	var compressed := blocks.compress(
+		CompressionMode.COMPRESSION_FASTLZ
+	)
+
+	# Only replace the raw buffer when compression actually saves space.
+	if compressed.size() >= blocks.size():
+		return false
+
+	compressed_blocks = compressed
+	blocks = PackedByteArray()
+	blocks_compressed = true
+	return true
+
+
 func _recalculate_mesh_max_y() -> void:
+	_ensure_blocks_resident()
 	mesh_max_y_exclusive = 1
 
 	for y in range(CHUNK_HEIGHT - 1, -1, -1):
@@ -178,6 +227,8 @@ func _get_index(x: int, y: int, z: int) -> int:
 
 
 func set_block(x: int, y: int, z: int, block_id: int) -> void:
+	_ensure_blocks_resident()
+
 	if x < 0 or x >= CHUNK_SIZE:
 		return
 
@@ -199,6 +250,8 @@ func set_block(x: int, y: int, z: int, block_id: int) -> void:
 
 
 func get_block(x: int, y: int, z: int) -> int:
+	_ensure_blocks_resident()
+
 	if x < 0 or x >= CHUNK_SIZE:
 		return AIR
 
@@ -212,6 +265,7 @@ func get_block(x: int, y: int, z: int) -> int:
 
 
 func begin_terrain_generation() -> void:
+	_ensure_blocks_resident()
 	set_generation_stage(GenerationStage.TERRAIN_GENERATING)
 
 	blocks.resize(
@@ -576,6 +630,8 @@ func apply_generated_data(
 	generated_blocks: PackedByteArray
 ) -> void:
 
+	compressed_blocks = PackedByteArray()
+	blocks_compressed = false
 	blocks = generated_blocks
 	_recalculate_mesh_max_y()
 	mesh_data_revision += 1
@@ -700,6 +756,7 @@ func clear_visual_meshes() -> void:
 
 func clear_collision() -> void:
 	$ChunkCollision/CollisionShape.shape = null
+	collision_faces = PackedVector3Array()
 	collision_ready = false
 	collision_available = false
 
@@ -718,12 +775,19 @@ func build_collision() -> void:
 		$ChunkCollision/CollisionShape.shape = null
 		collision_ready = true
 		collision_available = true
+		collision_faces = PackedVector3Array()
 		set_generation_stage(GenerationStage.READY)
 		return
 
 	var collision_shape := ConcavePolygonShape3D.new()
 	collision_shape.set_faces(collision_faces)
 	$ChunkCollision/CollisionShape.shape = collision_shape
+
+	# ConcavePolygonShape3D owns the collision geometry after set_faces().
+	# Keeping the source vertex buffer around wastes a large amount of RAM,
+	# especially across thousands of chunks.
+	collision_faces = PackedVector3Array()
+
 	collision_ready = true
 	collision_available = true
 	set_generation_stage(GenerationStage.READY)
