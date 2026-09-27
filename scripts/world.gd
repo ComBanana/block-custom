@@ -3456,10 +3456,9 @@ func load_chunk(
 		enqueue_neighbor_meshes(chunk_coord)
 		return
 
-	var next_generation_revision: int = int(
+	generation_revisions[chunk_coord] = int(
 		generation_revisions.get(chunk_coord, 0)
 	) + 1
-	generation_revisions[chunk_coord] = next_generation_revision
 
 	if (
 		is_chunk_critical(chunk_coord)
