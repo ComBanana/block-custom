@@ -4383,11 +4383,11 @@ func update_collision_range(
 
 	for x in range(min_x, max_x + 1):
 		for z in range(min_z, max_z + 1):
-			var was_near := (
+			var was_near: bool = (
 				abs(x - old_center.x) <= radius
 				and abs(z - old_center.y) <= radius
 			)
-			var is_near := (
+			var is_near: bool = (
 				abs(x - new_center.x) <= radius
 				and abs(z - new_center.y) <= radius
 			)
