@@ -829,9 +829,7 @@ func build_collision() -> void:
 	if collision_boxes.is_empty():
 		collision_ready = true
 		collision_available = true
-		set_generation_stage(GenerationStage.READY
-
-)
+		set_generation_stage(GenerationStage.READY)
 		if collision_was_in_tree and collision_parent != null:
 			collision_parent.add_child(collision_body)
 		return
