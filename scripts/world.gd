@@ -2501,41 +2501,52 @@ func can_player_enter_chunk(
 func ensure_player_collision_ready(
 	world_position: Vector3
 ) -> bool:
-	# The collision queue is normally asynchronous. The chunk containing the
-	# player gets one synchronous repair attempt so physics cannot run through
-	# a newly-loaded chunk just because the queue is one frame behind.
+	# Physics must never enter a chunk that has not finished its full
+	# terrain -> mesh -> collision pipeline. This function runs from the
+	# CharacterBody3D physics callback, so it only PROMOTES work; actual
+	# StaticBody3D shape installation stays in World._process().
 	var center_chunk := world_to_chunk(world_position)
-	var offsets: Array[Vector2i] = [
-		Vector2i.ZERO,
-		Vector2i(-1, 0),
-		Vector2i(1, 0),
-		Vector2i(0, -1),
-		Vector2i(0, 1),
-		Vector2i(-1, -1),
-		Vector2i(-1, 1),
-		Vector2i(1, -1),
-		Vector2i(1, 1)
-	]
+	var radius: int = maxi(1, collision_distance)
 
-	for offset: Vector2i in offsets:
-		var chunk_coord := center_chunk + offset
-		if not loaded_chunks.has(chunk_coord):
-			continue
+	for x in range(-radius, radius + 1):
+		for z in range(-radius, radius + 1):
+			var offset := Vector2i(x, z)
+			var chunk_coord := center_chunk + offset
 
-		var chunk = loaded_chunks[chunk_coord]
+			if not loaded_chunks.has(chunk_coord):
+				continue
 
-		if not chunk.is_generated or not chunk.mesh_ready:
-			if offset == Vector2i.ZERO:
-				return false
-			continue
+			var chunk = loaded_chunks[chunk_coord]
 
-		if chunk.collision_ready or chunk.collision_available:
-			continue
+			if not chunk.is_generated:
+				# Newly reached chunks can still be sitting behind the normal
+				# generation queue. Promote them immediately so streaming starts
+				# before the player reaches their terrain.
+				if not critical_generation_queued.has(chunk_coord):
+					critical_generation_queue.push_front(chunk_coord)
+					critical_generation_queued[chunk_coord] = true
 
-		# Collision shape changes are kept out of CharacterBody3D's physics
-		# callback. Queue the current chunk and let World._process() install its
-		# primitive shapes before the next physics step.
-		enqueue_collision_chunk(chunk_coord)
+				if offset == Vector2i.ZERO:
+					return false
+				continue
+
+			if not chunk.mesh_ready:
+				# The collision queue cannot work until this chunk has a mesh.
+				# Make the mesh request now instead of waiting for the normal
+				# background streamer to reach it.
+				enqueue_mesh_chunk(chunk_coord)
+
+				if offset == Vector2i.ZERO:
+					return false
+				continue
+
+			if chunk.collision_ready or chunk.collision_available:
+				continue
+
+			# Collision shape changes are kept out of CharacterBody3D's physics
+			# callback. Queue the current chunk and let World._process() install
+			# its primitive shapes before the next physics step.
+			enqueue_collision_chunk(chunk_coord)
 
 	return can_player_enter_chunk(center_chunk)
 
@@ -4744,10 +4755,19 @@ func _update_collision_chunk_state(
 		is_chunk_within_collision_distance(chunk_coord)
 		or _is_chunk_teleport_required(chunk_coord)
 	):
-		if chunk.mesh_ready and not chunk.collision_ready:
+		if not chunk.is_generated:
+			if not critical_generation_queued.has(chunk_coord):
+				critical_generation_queue.push_front(chunk_coord)
+				critical_generation_queued[chunk_coord] = true
+		elif not chunk.mesh_ready:
+			# Collision cannot be prepared until the solid mesh worker has
+			# produced the corresponding collision box set. Promote this mesh
+			# instead of waiting for the background streamer.
+			enqueue_mesh_chunk(chunk_coord)
+		elif not chunk.collision_ready:
 			enqueue_collision_chunk(chunk_coord)
 	else:
-		if chunk.collision_ready:
+		if chunk.collision_ready or chunk.collision_available:
 			chunk.clear_collision()
 
 
@@ -5563,8 +5583,9 @@ func try_spawn_player():
 	var total: int = get_loading_area_total()
 	var completed: int = get_loading_area_ready()
 
-	# The loading screen only waits for generated chunk data.
-	# Rendering/collision begins after the loading screen finishes.
+	# The loading screen waits for generated chunk data. The startup
+	# rendering phase then produces the initial visible terrain and the full
+	# collision bootstrap before controls are enabled.
 	if completed < total:
 		return
 
@@ -5706,9 +5727,18 @@ func try_start_gameplay() -> void:
 	if spawn_chunk == null:
 		return
 
-	# Only the player's own chunk must be fully collidable before input is
-	# unlocked. Neighboring collision builds continue without freezing input.
-	if not spawn_chunk.mesh_ready or not spawn_chunk.collision_ready:
+	# The player does not enter gameplay until the complete collision
+	# bootstrap square is ready. This prevents the classic startup failure
+	# where the spawn chunk is solid but the player reaches the surrounding
+	# rendered terrain before its collision exists.
+	if not _loading_collision_ready():
+		# Keep the entire collision square actively fed through the mesh and
+		# collision pipeline while the player is still behind the loading phase.
+		for x in range(-collision_distance, collision_distance + 1):
+			for z in range(-collision_distance, collision_distance + 1):
+				_update_collision_chunk_state(
+					player_chunk + Vector2i(x, z)
+				)
 		return
 
 	startup_rendering = false
