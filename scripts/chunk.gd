@@ -53,6 +53,9 @@ var mountain_shape_noise: FastNoiseLite
 var generation_passes_done: bool = false
 var mesh_ready: bool = false
 var collision_ready: bool = false
+# True when a collision shape from this chunk exists and remains usable while
+# a newer mesh/collision rebuild is being prepared.
+var collision_available: bool = false
 var generation_stage: GenerationStage = GenerationStage.UNLOADED
 
 var is_generated: bool = false
@@ -92,6 +95,7 @@ func reset_for_reuse() -> void:
 	generation_passes_done = false
 	mesh_ready = false
 	collision_ready = false
+	collision_available = false
 	generation_stage = GenerationStage.UNLOADED
 
 	is_generated = false
@@ -589,14 +593,28 @@ func apply_generated_data(
 
 
 func cancel_mesh_build() -> void:
+	# Keep the current visual mesh and collision available while the canceled
+	# worker result is discarded. New chunks without a previous mesh remain
+	# not-ready and will still be built normally.
+	var had_mesh: bool = mesh_ready
+	var had_collision: bool = collision_ready
+
 	mesh_building = false
 	mesh_rebuild_requested = false
 	water_mesh_rebuild_requested = false
-	mesh_ready = false
+	mesh_ready = had_mesh
+	collision_ready = had_collision
 	mesh_job_id += 1
 
 	if is_generated:
-		set_generation_stage(GenerationStage.MESH_QUEUED)
+		if mesh_ready:
+			set_generation_stage(
+				Chunk.GenerationStage.MESH_READY
+			)
+		else:
+			set_generation_stage(
+				Chunk.GenerationStage.MESH_QUEUED
+			)
 
 
 func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
@@ -623,7 +641,25 @@ func apply_mesh_buffer(buffer: ChunkMesher.MeshBuffer) -> void:
 	mesh_building = false
 	mesh_ready = true
 	collision_ready = false
+	# Preserve collision_available: an older collision shape is still valid
+	# until the replacement is built on the main thread.
 	set_generation_stage(GenerationStage.MESH_READY)
+
+
+func apply_water_mesh(water_surface: ChunkMesher.MeshSurface) -> void:
+	var water_mesh := ArrayMesh.new()
+
+	_add_mesh_surface(
+		water_mesh,
+		water_material,
+		water_surface
+	)
+
+	$WaterMesh.mesh = water_mesh
+	mesh_building = false
+	# Water has no walkable collision. Keep the existing solid mesh/collision
+	# completely untouched.
+	mesh_ready = true
 
 
 func _add_mesh_surface(
@@ -665,6 +701,7 @@ func clear_visual_meshes() -> void:
 func clear_collision() -> void:
 	$ChunkCollision/CollisionShape.shape = null
 	collision_ready = false
+	collision_available = false
 
 	if mesh_ready:
 		set_generation_stage(GenerationStage.MESH_READY)
@@ -680,6 +717,7 @@ func build_collision() -> void:
 	if collision_faces.is_empty():
 		$ChunkCollision/CollisionShape.shape = null
 		collision_ready = true
+		collision_available = true
 		set_generation_stage(GenerationStage.READY)
 		return
 
@@ -687,6 +725,7 @@ func build_collision() -> void:
 	collision_shape.set_faces(collision_faces)
 	$ChunkCollision/CollisionShape.shape = collision_shape
 	collision_ready = true
+	collision_available = true
 	set_generation_stage(GenerationStage.READY)
 
 
