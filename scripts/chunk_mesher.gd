@@ -202,7 +202,8 @@ static func build_from_blocks(
 	pos_z_blocks: PackedByteArray,
 	chunk_coordinate: Vector2i = Vector2i.ZERO,
 	max_y_exclusive: int = CHUNK_HEIGHT,
-	include_collision: bool = true
+	include_collision: bool = true,
+	water_only: bool = false
 ) -> MeshBuffer:
 	max_y_exclusive = clampi(
 		max_y_exclusive,
@@ -251,12 +252,44 @@ static func build_from_blocks(
 		max_y_exclusive
 	)
 
+	if water_only:
+		return build_water_only(
+			snapshot,
+			max_y_exclusive
+		)
+
 	return build(
 		snapshot,
 		chunk_coordinate,
 		max_y_exclusive,
 		include_collision
 	)
+
+
+static func build_water_only(
+	snapshot: PackedByteArray,
+	max_y_exclusive: int = CHUNK_HEIGHT
+) -> MeshBuffer:
+	var buffer := MeshBuffer.new()
+
+	for x in range(CHUNK_SIZE):
+		for z in range(CHUNK_SIZE):
+			for y in range(max_y_exclusive):
+				var block_id: int = snapshot[
+					padded_index(x, y, z)
+				]
+
+				if is_water(block_id):
+					_add_water_faces(
+						snapshot,
+						x,
+						y,
+						z,
+						block_id,
+						buffer
+					)
+
+	return buffer
 
 
 static func _copy_center_blocks(
