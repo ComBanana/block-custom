@@ -52,6 +52,7 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export var loading_mesh_apply_boost: int = 6
 @export var loading_collision_boost: int = 6
 @export var loading_focus_radius: int = 2
+@export var startup_load_radius: int = 3
 @export var loading_scheduler_scan_limit: int = 64
 @export var loading_mesh_budget_ms: float = 8.0
 @export var startup_mesh_radius: int = 4
@@ -183,6 +184,26 @@ var loaded_chunks: Dictionary = {}
 # ===================================================================
 
 var required_chunks: Dictionary = {}
+
+
+func _get_startup_load_radius() -> int:
+	# Only the area around the player's saved/current coordinates blocks
+	# startup. Render-distance data streams in after gameplay begins.
+	return mini(
+		maxi(render_distance, 0),
+		maxi(
+			maxi(spawn_load_radius, collision_distance),
+			maxi(0, startup_load_radius)
+		)
+	)
+
+
+func _is_startup_chunk(chunk_coord: Vector2i) -> bool:
+	var radius := _get_startup_load_radius()
+	return (
+		abs(chunk_coord.x - player_chunk.x) <= radius
+		and abs(chunk_coord.y - player_chunk.y) <= radius
+	)
 # Cached spiral offsets are reused when the render distance does not change.
 # Normal chunk movement shifts the window incrementally instead of rebuilding
 # this entire list every time.
@@ -2520,16 +2541,13 @@ func is_chunk_critical(
 	var active_critical_distance: int = critical_chunk_distance
 
 	# Before the player enters the world, the bootstrap area must win
-	# over the normal background streaming ring. This keeps the
-	# loading phase focused on the chunks the player will immediately
-	# see and interact with.
+	# over the normal background streaming ring. Keep every chunk in the
+	# startup load radius on the critical path so missing files are generated
+	# locally instead of allowing far terrain to consume workers.
 	if not player_spawned:
 		active_critical_distance = maxi(
 			active_critical_distance,
-			maxi(
-				loading_focus_radius,
-				spawn_load_radius
-			)
+			_get_startup_load_radius()
 		)
 
 	return (
@@ -3000,9 +3018,19 @@ func _update_chunks_full() -> void:
 		)
 		required_chunks[chunk_coord] = true
 
-	# Rebuild the load queue only for startup or large movements.
+	# Startup is two-phase:
+	#   1. Probe only the small area around the player's coordinates for
+	#      already-saved chunk files and put those first.
+	#   2. Queue missing bootstrap chunks after the saved ones.
+	# The rest of render_distance is queued behind the bootstrap area and
+	# is not submitted until the player has entered gameplay.
 	load_queue.clear()
 	load_queued.clear()
+
+	var startup_existing: Array[Vector2i] = []
+	var startup_missing: Array[Vector2i] = []
+	var background_chunks: Array[Vector2i] = []
+	var startup_radius := _get_startup_load_radius()
 
 	for offset in spiral_offsets:
 		var chunk_coord := player_chunk + offset
@@ -3013,6 +3041,41 @@ func _update_chunks_full() -> void:
 		if loaded_chunks.has(chunk_coord):
 			continue
 
+		var distance := maxi(
+			abs(offset.x),
+			abs(offset.y)
+		)
+
+		if distance <= startup_radius:
+			# Never scan the whole world directory. We only test the exact
+			# expected filenames near the player, e.g. "12_-4.bin".
+			var has_memory_copy := (
+				pending_chunk_saves.has(chunk_coord)
+				or chunk_data_cache.has(chunk_coord)
+			)
+			var has_disk_copy := FileAccess.file_exists(
+				WorldStore.chunk_path(
+					world_name,
+					chunk_coord
+				)
+			)
+
+			if has_memory_copy or has_disk_copy:
+				startup_existing.append(chunk_coord)
+			else:
+				startup_missing.append(chunk_coord)
+		else:
+			background_chunks.append(chunk_coord)
+
+	for chunk_coord in startup_existing:
+		load_queue.append(chunk_coord)
+		load_queued[chunk_coord] = true
+
+	for chunk_coord in startup_missing:
+		load_queue.append(chunk_coord)
+		load_queued[chunk_coord] = true
+
+	for chunk_coord in background_chunks:
 		load_queue.append(chunk_coord)
 		load_queued[chunk_coord] = true
 
@@ -3280,7 +3343,16 @@ func process_load_queue() -> void:
 		chunk_load_tasks.size() < max_in_flight
 		and not load_queue.is_empty()
 	):
-		var chunk_coord: Vector2i = load_queue.pop_front()
+		var chunk_coord: Vector2i = load_queue[0]
+
+		# Before gameplay, never let the far render-distance queue jump ahead
+		# of the bootstrap area. This makes startup truly local: saved chunks
+		# around the player first, missing local chunks second, everything else
+		# after gameplay begins.
+		if not player_spawned and not _is_startup_chunk(chunk_coord):
+			break
+
+		load_queue.pop_front()
 		load_queued.erase(chunk_coord)
 
 		if not _is_chunk_needed(chunk_coord):
@@ -3743,12 +3815,17 @@ func process_generation_queue() -> void:
 
 
 func get_next_generation_candidate() -> Vector2i:
+	# During startup, only generate the bootstrap area. Far terrain must not
+	# consume worker slots or CPU time until the player is actually moving.
 	var critical := _take_best_generation_candidate(
 		critical_generation_queue,
 		critical_generation_queued
 	)
 	if critical != INVALID_CHUNK:
 		return critical
+
+	if not player_spawned:
+		return INVALID_CHUNK
 
 	return _take_best_generation_candidate(
 		generation_queue,
@@ -5257,27 +5334,33 @@ func finish_exit_cleanup() -> void:
 # ===================================================================
 
 func get_loading_area_total() -> int:
-	# The loading screen intentionally covers the entire configured
-	# render-distance square. This prevents background terrain streaming
-	# from immediately competing with gameplay after spawn.
-	return required_chunks.size()
+	# Startup only waits for the small local bootstrap square around the
+	# player's saved/current coordinates. The old behavior waited for every
+	# chunk in render_distance (4,225 chunks at RD32), which made startup
+	# scale with the entire visible world instead of the spawn area.
+	var radius := _get_startup_load_radius()
+	return (radius * 2 + 1) * (radius * 2 + 1)
 
 
 func get_loading_area_ready() -> int:
 	var ready_count: int = 0
+	var radius := _get_startup_load_radius()
 
-	for chunk_coord in required_chunks:
-		if not loaded_chunks.has(chunk_coord):
-			continue
+	for x in range(-radius, radius + 1):
+		for z in range(-radius, radius + 1):
+			var chunk_coord := player_chunk + Vector2i(x, z)
 
-		var chunk = loaded_chunks[chunk_coord]
+			if not loaded_chunks.has(chunk_coord):
+				continue
 
-		# The loading screen is intentionally data-only. Mesh generation
-		# starts after the loading screen finishes.
-		if not chunk.is_generated:
-			continue
+			var chunk = loaded_chunks[chunk_coord]
 
-		ready_count += 1
+			# The loading screen is data-only. Mesh generation/collision starts
+			# after the bootstrap data is present.
+			if not chunk.is_generated:
+				continue
+
+			ready_count += 1
 
 	return ready_count
 
