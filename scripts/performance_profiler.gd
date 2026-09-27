@@ -208,6 +208,7 @@ func _reset_frame_histogram() -> void:
 		0,
 		0,
 		0,
+		0,
 		0
 	]
 
@@ -1243,19 +1244,19 @@ func _percentile(
 
 
 func _monitor_float(
-	monitor: Performance.Monitor
+	monitor: int
 ) -> float:
 	return float(Performance.get_monitor(monitor))
 
 
 func _monitor_int(
-	monitor: Performance.Monitor
+	monitor: int
 ) -> int:
 	return int(Performance.get_monitor(monitor))
 
 
 func _ms_monitor(
-	monitor: Performance.Monitor
+	monitor: int
 ) -> float:
 	return _monitor_float(monitor) * 1000.0
 
