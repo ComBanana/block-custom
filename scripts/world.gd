@@ -2024,6 +2024,19 @@ func _process(delta: float) -> void:
 
 	PerformanceProfiler.set_world_state({
 		"player_chunk": [player_chunk.x, player_chunk.y],
+		"player_position": [
+			player.global_position.x,
+			player.global_position.y,
+			player.global_position.z
+		],
+		"player_velocity": [
+			player.velocity.x,
+			player.velocity.y,
+			player.velocity.z
+		],
+		"play_time_seconds": play_time_seconds,
+		"blocks_broken": blocks_broken,
+		"blocks_placed": blocks_placed,
 		"loaded_chunks": loaded_chunks.size(),
 		"required_chunks": required_chunks.size(),
 		"generation_tasks": generation_tasks.size(),
