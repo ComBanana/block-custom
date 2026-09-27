@@ -831,6 +831,11 @@ func build_collision() -> void:
 	if not mesh_ready:
 		return
 
+	# Far render-region chunks intentionally live outside the SceneTree. They
+	# cannot provide physics there, so never mark their collision as ready.
+	if not is_inside_tree():
+		return
+
 	var collision_body := get_node_or_null("ChunkCollision") as StaticBody3D
 	if collision_body == null:
 		collision_ready = false
