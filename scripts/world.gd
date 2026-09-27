@@ -73,18 +73,18 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 @export_category("Streaming")
 @export var chunks_loaded_per_frame: int = 4
 @export var max_chunk_load_tasks: int = 4
-@export var gameplay_chunk_load_apply_limit: int = 2
-@export var gameplay_chunk_load_budget_ms: float = 1.0
+@export var gameplay_chunk_load_apply_limit: int = 3
+@export var gameplay_chunk_load_budget_ms: float = 1.25
 @export var max_generation_tasks: int = 8
 @export var max_mesh_tasks: int = 6
 @export var mesh_columns_per_frame: int = 16
 @export var mesh_budget_ms: float = 2.5
 @export var max_mesh_chunks_per_frame: int = 2
-@export var gameplay_mesh_tasks: int = 3
-@export var gameplay_mesh_apply_limit: int = 1
-@export var gameplay_mesh_queue_target: int = 12
-@export var gameplay_mesh_refill_per_frame: int = 3
-@export var collisions_per_frame: int = 2
+@export var gameplay_mesh_tasks: int = 5
+@export var gameplay_mesh_apply_limit: int = 2
+@export var gameplay_mesh_queue_target: int = 20
+@export var gameplay_mesh_refill_per_frame: int = 6
+@export var collisions_per_frame: int = 3
 @export var critical_chunk_distance: int = 3
 @export var block_updates_per_tick: int = 2
 @export var max_cached_chunk_data: int = 256
@@ -95,6 +95,8 @@ const CELESTIAL_ORBIT_RADIUS: float = 240.0
 
 @export_category("Collision")
 @export var collision_distance: int = 3
+@export var stream_prefetch_distance: int = 5
+@export var gameplay_mesh_prefetch_scan_limit: int = 256
 
 @export_category("Persistence")
 @export_range(1, 8, 1) var chunk_cache_saves_per_frame: int = 1
@@ -2828,6 +2830,75 @@ func _append_unique_chunk(
 	seen[chunk_coord] = true
 	chunks.append(chunk_coord)
 
+func _compare_stream_chunk_candidates(
+	first: Vector2i,
+	second: Vector2i
+) -> bool:
+	var first_score: float = _chunk_stream_score(first)
+	var second_score: float = _chunk_stream_score(second)
+
+	if is_equal_approx(first_score, second_score):
+		return (
+			stream_offset_indices.get(
+				first - player_chunk,
+				999999
+			)
+			<
+			stream_offset_indices.get(
+				second - player_chunk,
+				999999
+			)
+		)
+
+	return first_score > second_score
+
+
+func _prioritize_load_queue_around_player() -> void:
+	if not player_spawned or load_queue.size() < 2:
+		return
+
+	var radius: int = maxi(
+		1,
+		stream_prefetch_distance
+	)
+
+	var candidates: Array[Vector2i] = []
+	var candidate_set: Dictionary = {}
+
+	for x in range(-radius, radius + 1):
+		for z in range(-radius, radius + 1):
+			var chunk_coord := player_chunk + Vector2i(x, z)
+
+			if (
+				loaded_chunks.has(chunk_coord)
+				or not load_queued.has(chunk_coord)
+				or candidate_set.has(chunk_coord)
+			):
+				continue
+
+			candidates.append(chunk_coord)
+			candidate_set[chunk_coord] = true
+
+	if candidates.is_empty():
+		return
+
+	candidates.sort_custom(
+		Callable(
+			self,
+			"_compare_stream_chunk_candidates"
+		)
+	)
+
+	var reordered: Array[Vector2i] = []
+	for chunk_coord in candidates:
+		reordered.append(chunk_coord)
+
+	for chunk_coord in load_queue:
+		if not candidate_set.has(chunk_coord):
+			reordered.append(chunk_coord)
+
+	load_queue = reordered
+
 
 func _prune_chunk_queue(
 	queue: Array[Vector2i],
@@ -3023,6 +3094,11 @@ func _update_chunks_incremental(
 
 		load_queue.push_front(chunk_coord)
 		load_queued[chunk_coord] = true
+
+	# Promote the nearby movement corridor ahead of the player before the
+	# next load-queue pass. This prevents far render-distance chunks from
+	# consuming the disk-read slots while a nearby chunk is still unloaded.
+	_prioritize_load_queue_around_player()
 
 	# Only these outgoing chunks need unloading. Do not scan all ~4,000 loaded
 	# chunks when the player crosses a single chunk boundary.
@@ -4822,6 +4898,46 @@ func update_collision_range(
 		_update_collision_chunk_state(chunk_coord)
 
 
+func _take_best_collision_candidate() -> Vector2i:
+	var best_index := -1
+	var best_score: float = -INF
+
+	# Collision queues are intentionally small (normally the 7x7 active
+	# collision square), so choosing the most useful chunk here is cheaper than
+	# allowing a FIFO queue to build the wrong edge of the square first.
+	for index in range(collision_queue.size()):
+		var coord: Vector2i = collision_queue[index]
+
+		if (
+			not collision_queued.has(coord)
+			or not loaded_chunks.has(coord)
+		):
+			continue
+
+		var chunk = loaded_chunks[coord]
+		if not chunk.mesh_ready or chunk.collision_ready:
+			continue
+
+		if (
+			not is_chunk_within_collision_distance(coord)
+			and not _is_chunk_teleport_required(coord)
+		):
+			continue
+
+		var score := _chunk_stream_score(coord)
+		if score > best_score:
+			best_score = score
+			best_index = index
+
+	if best_index == -1:
+		return INVALID_CHUNK
+
+	var selected: Vector2i = collision_queue[best_index]
+	collision_queue.remove_at(best_index)
+	collision_queued.erase(selected)
+	return selected
+
+
 func process_collision_queue() -> void:
 
 	var collisions_done: int = 0
@@ -4829,25 +4945,14 @@ func process_collision_queue() -> void:
 
 	while collisions_done < collision_limit:
 
-		if collision_queue.is_empty():
+		var chunk_coord := _take_best_collision_candidate()
+		if chunk_coord == INVALID_CHUNK:
 			return
 
-		var chunk_coord: Vector2i = (
-			collision_queue.pop_front()
-		)
-
-		collision_queued.erase(
-			chunk_coord
-		)
-
-		if not loaded_chunks.has(
-			chunk_coord
-		):
+		if not loaded_chunks.has(chunk_coord):
 			continue
 
-		var chunk = loaded_chunks[
-			chunk_coord
-		]
+		var chunk = loaded_chunks[chunk_coord]
 
 		if (
 			not is_chunk_within_collision_distance(chunk_coord)
@@ -5695,6 +5800,61 @@ func _refill_mesh_stream_queue() -> void:
 	)
 	var added: int = 0
 
+	# First refill pass: continually inspect a small player-centered window
+	# and choose the best loaded/generated chunks using the actual movement
+	# direction. Unlike the old one-way cursor, this immediately adapts when
+	# the player turns around.
+	var prefetch_scan_limit: int = clampi(
+		gameplay_mesh_prefetch_scan_limit,
+		1,
+		mesh_stream_offsets.size()
+	)
+	var prefetch_candidates: Array[Vector2i] = []
+
+	for index in range(prefetch_scan_limit):
+		var offset: Vector2i = mesh_stream_offsets[index]
+		var chunk_coord := player_chunk + offset
+
+		if not loaded_chunks.has(chunk_coord):
+			continue
+
+		var chunk = loaded_chunks[chunk_coord]
+
+		if (
+			not chunk.is_generated
+			or chunk.mesh_ready
+			or chunk.mesh_building
+		):
+			continue
+
+		prefetch_candidates.append(chunk_coord)
+
+	prefetch_candidates.sort_custom(
+		Callable(
+			self,
+			"_compare_stream_chunk_candidates"
+		)
+	)
+
+	for chunk_coord in prefetch_candidates:
+		if added >= add_limit or queued_normal >= target:
+			break
+
+		enqueue_mesh_chunk(chunk_coord)
+
+		# enqueue_mesh_chunk() may reject a candidate already represented in
+		# another queue. Count the queue sizes after the request so the target
+		# remains accurate without maintaining a second duplicate set.
+		queued_normal = (
+			critical_mesh_queue.size()
+			+ near_mesh_queue.size()
+			+ far_mesh_queue.size()
+		)
+		added += 1
+
+	# Second refill pass: once the local working set is saturated, fall back
+	# to the persistent spiral cursor so distant terrain continues streaming
+	# toward the full render distance instead of being starved forever.
 	while (
 		added < add_limit
 		and queued_normal < target
@@ -5718,8 +5878,12 @@ func _refill_mesh_stream_queue() -> void:
 			continue
 
 		enqueue_mesh_chunk(chunk_coord)
+		queued_normal = (
+			critical_mesh_queue.size()
+			+ near_mesh_queue.size()
+			+ far_mesh_queue.size()
+		)
 		added += 1
-		queued_normal += 1
 
 
 func try_start_gameplay() -> void:
