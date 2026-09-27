@@ -27,6 +27,15 @@ const GAME_TICK_INTERVAL: float = 1.0 / float(GAME_TICKS_PER_SECOND)
 const MAX_GAME_TICKS_PER_FRAME: int = 5
 const DEFAULT_WATER_TICK_DELAY: int = 5
 
+const WATER_ADJACENT_OFFSETS: Array[Vector3i] = [
+	Vector3i(0, -1, 0),
+	Vector3i(0, 1, 0),
+	Vector3i(-1, 0, 0),
+	Vector3i(1, 0, 0),
+	Vector3i(0, 0, -1),
+	Vector3i(0, 0, 1)
+]
+
 const PRIORITY_PLAYER: int = 0
 const PRIORITY_WATER: int = 1
 const PRIORITY_NEAR: int = 2
@@ -435,22 +444,10 @@ func _water_get(position: Vector3i) -> int:
 func _water_schedule_changed(
 	block_position: Vector3i
 ) -> void:
-	# Minecraft schedules the fluid itself when its state changes and
-	# wakes neighboring fluid blocks when a neighbor changes. Do not put
-	# empty cells into the queue unless they actually contain water.
-	if _is_water(_water_get(block_position)):
-		_water_schedule(block_position)
-
-	var offsets: Array[Vector3i] = [
-		Vector3i(0, -1, 0),
-		Vector3i(0, 1, 0),
-		Vector3i(-1, 0, 0),
-		Vector3i(1, 0, 0),
-		Vector3i(0, 0, -1),
-		Vector3i(0, 0, 1)
-	]
-
-	for offset: Vector3i in offsets:
+	# Water is strictly event-driven. A block-state change wakes only water
+	# cells in the six directly adjacent positions. A stable water cell is
+	# never scheduled merely because time passed.
+	for offset: Vector3i in WATER_ADJACENT_OFFSETS:
 		var neighbor: Vector3i = block_position + offset
 		if _is_water(_water_get(neighbor)):
 			_water_schedule(neighbor)
@@ -491,17 +488,8 @@ func _water_invalidate_cache_around(
 ) -> void:
 	# A water mutation only changes the answer for this voxel and its six
 	# directly adjacent neighbors. Keep the rest of the tick cache intact.
-	var offsets: Array[Vector3i] = [
-		Vector3i.ZERO,
-		Vector3i(0, -1, 0),
-		Vector3i(0, 1, 0),
-		Vector3i(-1, 0, 0),
-		Vector3i(1, 0, 0),
-		Vector3i(0, 0, -1),
-		Vector3i(0, 0, 1)
-	]
-
-	for offset: Vector3i in offsets:
+	water_block_cache.erase(block_position)
+	for offset: Vector3i in WATER_ADJACENT_OFFSETS:
 		water_block_cache.erase(block_position + offset)
 
 
@@ -509,8 +497,8 @@ func _water_set_quiet(
 	block_position: Vector3i,
 	block_id: int
 ) -> bool:
-	# Batch fluid writes skip per-voxel scheduling. The caller wakes only
-	# the final frontier after the batch completes.
+	# Batch fluid writes avoid scheduling the changed water cell itself.
+	# The changed voxel still wakes its six neighboring water cells.
 	if _water_get(block_position) == block_id:
 		return false
 
@@ -533,6 +521,9 @@ func _water_set_quiet(
 		return false
 
 	_water_mark_mesh_dirty(block_position)
+	# The changed voxel wakes only its six water neighbors. The batch caller
+	# separately schedules the new fluid frontier when it needs continuation.
+	_water_schedule_changed(block_position)
 	return true
 
 
@@ -564,6 +555,11 @@ func _water_set(
 		return false
 
 	_water_mark_mesh_dirty(block_position)
+
+	# A water cell that just changed gets one follow-up activation so newly
+	# created water can continue propagating. Stable water is not rescheduled.
+	if _is_water(block_id):
+		_water_schedule(block_position)
 	_water_schedule_changed(block_position)
 	return true
 
@@ -1141,83 +1137,13 @@ func _water_cell_has_open_destination(
 
 
 func enqueue_water_updates_for_chunk(
-	chunk_coord: Vector2i,
-	restore_saved_flow: bool = false
+	_chunk_coord: Vector2i,
+	_restore_saved_flow: bool = false
 ) -> void:
-	# Loading is allowed to prepare the scheduled fluid frontier, but only
-	# for the startup area. No fluid tick is processed until the player
-	# is released, so the saved/generated water state remains untouched.
-	if not player_spawned:
-		var startup_radius: int = maxi(
-			0,
-			spawn_load_radius
-		)
-		var startup_dx: int = abs(chunk_coord.x - player_chunk.x)
-		var startup_dz: int = abs(chunk_coord.y - player_chunk.y)
-
-		if (
-			startup_dx > startup_radius
-			or startup_dz > startup_radius
-		):
-			return
-
-	if not loaded_chunks.has(chunk_coord):
-		return
-
-	var chunk = loaded_chunks[chunk_coord]
-
-	if not chunk.is_generated:
-		return
-
-	if not restore_saved_flow:
-		# Newly generated terrain starts with source water at sea level.
-		# Only exposed source cells need to enter the simulation.
-		const SEA_LEVEL: int = 50
-
-		for x in range(CHUNK_SIZE):
-			for z in range(CHUNK_SIZE):
-				if chunk.get_block(x, SEA_LEVEL, z) != WATER:
-					continue
-
-				var block_position := Vector3i(
-					chunk_coord.x * CHUNK_SIZE + x,
-					SEA_LEVEL,
-					chunk_coord.y * CHUNK_SIZE + z
-				)
-
-				if _water_cell_has_open_destination(block_position):
-					_water_schedule(block_position)
-
-		return
-
-	# Saved chunks may contain partially-spread or falling water below
-	# sea level. Restore only active water frontiers rather than every
-	# water voxel in the chunk.
-	for x in range(CHUNK_SIZE):
-		for z in range(CHUNK_SIZE):
-			for y in range(CHUNK_HEIGHT):
-				var block_id: int = chunk.get_block(x, y, z)
-				var block_position := Vector3i(
-					chunk_coord.x * CHUNK_SIZE + x,
-					y,
-					chunk_coord.y * CHUNK_SIZE + z
-				)
-
-				if block_id == WATER_FALLING:
-					_water_schedule(block_position)
-					continue
-
-				if block_id == WATER:
-					# Only the exposed source frontier needs to wake up.
-					if _water_cell_has_open_destination(block_position):
-						_water_schedule(block_position)
-					continue
-
-				if not _is_water_flowing(block_id):
-					continue
-
-				if _water_cell_has_open_destination(block_position):
-					_water_schedule(block_position)
+	# Kept as a compatibility stub for older callers. Water is no longer
+	# bulk-scheduled when chunks load or generate; only block changes wake
+	# neighboring water cells.
+	return
 
 
 # ===================================================================
@@ -3578,13 +3504,7 @@ func load_chunk(
 		if was_legacy_format:
 			dirty_chunks[chunk_coord] = true
 
-		# Restart the saved water simulation from existing source blocks.
-		# Only source cells at sea level are queued, then normal water logic
-		# propagates the update outward without creating a large backlog.
-		enqueue_water_updates_for_chunk(
-			chunk_coord,
-			true
-		)
+		# Saved water remains static until a neighboring block actually changes.
 		enqueue_mesh_chunk(chunk_coord)
 		enqueue_neighbor_meshes(chunk_coord)
 		return
@@ -3731,13 +3651,9 @@ func process_generation_queue() -> void:
 		# not repeatedly write the whole render-distance area.
 		generated_cache_pending[chunk_coord] = true
 
-		# Kick the water simulation from exposed source cells only.
-		# Interior ocean water needs no update until an exposed frontier
-		# reaches it, keeping chunk generation from creating a huge queue.
-		enqueue_water_updates_for_chunk(
-			chunk_coord
-		)
-
+		# Newly generated water remains static until a neighboring block
+		# actually changes. This prevents chunk streaming from waking whole
+		# fluid frontiers.
 		if (
 			render_regions == null
 			or not render_regions.is_chunk_batched(chunk_coord)
